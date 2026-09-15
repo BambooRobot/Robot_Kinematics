@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robotkinematics"
+dynamic = ["version"]
+description = "具身智能机器人学基础（第一章）的完整实现：位姿 → 变换链 → FK → IK → 雅可比 → 奇异点 → 冗余 → 抓取任务流水线"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["robotics", "kinematics", "SE3", "jacobian", "frank-panda", "education"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy<2",        # 与课件 requirements 一致；roboticstoolbox 在 numpy 2 下会报 _ARRAY_API not found
+    "matplotlib>=3.5",
+    "PyYAML>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "mypy>=1.8"]
+# 只在 `rkin crosscheck` 时需要：把自研结果与课件用的真库逐项对照。
+# 不装也能跑全部功能，crosscheck 会打印跳过原因。
+crosscheck = ["spatialmath-python", "roboticstoolbox-python"]
+
+[project.scripts]
+rkin = "robotkinematics.cli.main:main"
+
+[project.urls]
+Documentation = "docs/GUIDE.md"
+Source = "https://github.com/BambooRobot/Robot_Kinematics"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# 版本号的单一来源是 src/robotkinematics/__init__.py 的 __version__
+# （打包时读它，不在两个文件里各写一遍）
+[tool.setuptools.dynamic]
+version = { attr = "robotkinematics.__version__" }
+
+# ── 测试 ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "slow: 需要较多计算（例如工作空间采样）的测试",
+]
+
+# ── 覆盖率 ──────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src/robotkinematics"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+# ── 静态检查（ruff：风格 + 常见 bug + import 排序）──────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff 自己的规则
+]
+ignore = [
+    "E501",    # 行长由 line-length 控制，且中文注释按显示宽度算会误报
+    "SIM108",  # 三元表达式不一定比 if 清楚，本项目优先可读性
+    "RUF001",  # 全角标点是有意为之（中文文档字符串）
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # 测试里 assert False 是合法写法（这里其实没用，留着以防万一）
+
+[tool.ruff.lint.isort]
+known-first-party = ["robotkinematics"]
+
+# ── 类型检查（渐进式：先保证公开接口有类型且互相自洽）───────────────────────
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+strict_equality = true
+check_untyped_defs = true
+# 可选依赖没装时不该让类型检查失败
+ignore_missing_imports = true
+exclude = ["^docs/"]

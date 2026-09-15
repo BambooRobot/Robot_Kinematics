@@ -1,0 +1,4 @@
+case_id,q1,q2,q3,q4,q5,q6,q7,description
+zero,0,0,0,0,0,0,0,Panda全零姿态
+ppt_goal,0,-0.4,0,-2.2,0,2.0,0.7853981634,Panda FK演示姿态
+ik_seed,0,-0.3,0,-2.2,0,2.0,0.8,Panda IK/Jacobian演示姿态

@@ -1,0 +1,5 @@
+case_id,cup_x_camera,cup_y_camera,cup_z_camera,camera_x_base,camera_y_base,camera_z_base,camera_yaw_deg,description
+ppt_case,0.50,-0.10,0.20,0.30,0.00,0.60,30,PPT中的camera到base变换案例
+change_x,0.70,-0.10,0.20,0.30,0.00,0.60,30,练习1：修改杯子x
+change_y,0.50,0.20,0.20,0.30,0.00,0.60,30,练习1：修改杯子y
+yaw_zero,0.50,-0.10,0.20,0.30,0.00,0.60,0,练习1：相机yaw改成0

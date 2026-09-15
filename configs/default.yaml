@@ -1,0 +1,39 @@
+# robot_kinematics_app 运行配置
+#
+# 命令行参数优先级高于本文件：例如 `rkin fk --q1 30` 会覆盖下面 planar 里的默认关节角。
+# 程序按相对路径查找本文件与 data/，因此需要在项目根目录下运行。
+
+planar:
+  l1: 1.0             # 二连杆第一节长度 [m]
+  l2: 1.0             # 第二节长度 [m]
+
+camera:
+  # 相机在机器人本体（base frame）下的安装位姿
+  x: 0.30             # [m]
+  y: 0.00             # [m]
+  z: 0.60             # [m]
+  yaw_deg: 30.0       # 相机绕 base 的 z 轴转角 [deg]
+
+ik:
+  dls_lambda: 0.05    # 阻尼最小二乘的阻尼系数 λ，越大越稳、越慢
+  max_iter: 200       # 最大迭代次数
+  tol: 1.0e-9         # 收敛判据：末端位姿误差范数下限
+  step: 1.0           # 迭代步长缩放 (0,1]，1.0 为全步
+
+singularity:
+  det_eps: 1.0e-9     # |det(J)| 小于此值判为奇异
+  cond_warn: 100.0    # cond(J) 超过此值提示“接近奇异”
+
+paths:
+  cases_dir: data/cases
+  outputs_dir: outputs
+
+pick:
+  # 抓取任务流水线的参数（对应 rkin pick）
+  seeds: 24                  # 多初值 IK 的初值个数（越多越不容易漏解，也越慢）
+  residual_tol: 1.0e-6       # 末端位姿残差上限 [m / rad]，超过视为"没解出来"
+  unreachable_residual: 0.02 # 最佳残差超过此值判为"姿态不可达"，否则判为"未收敛"
+  min_sigma: 0.02            # 雅可比最小奇异值下限，低于此值判为该解"接近奇异"
+  workspace_samples: 8000    # 工作空间采样的姿态数（可达边界是估计值）
+  workspace_seed: 0          # 采样种子，固定以保证结论可复现
+  limit_margin_deg: 0.0      # 关节限位余量要求 [deg]，0 表示只要不越界即可

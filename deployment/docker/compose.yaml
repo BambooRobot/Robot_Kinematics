@@ -1,0 +1,20 @@
+# 只提供环境。起来之后自己进容器敲命令，不会自动跑任何东西。
+name: robot-kinematics
+
+services:
+  runtime:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/standalone/Dockerfile
+      args:
+        APT_MIRROR: mirrors.tuna.tsinghua.edu.cn
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
+    image: robot-kinematics:latest
+    working_dir: /app
+    volumes:
+      # 配置、算例、产物都挂出来：容器里跑出的报告和图直接留在宿主机上
+      - ../../configs:/app/configs:ro
+      - ../../data:/app/data:ro
+      - ../../outputs:/app/outputs
+    restart: unless-stopped

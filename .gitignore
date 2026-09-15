@@ -1,0 +1,19 @@
+# 运行时产物：报告、图、动画；保留目录本身
+outputs/*
+!outputs/.gitkeep
+
+build/
+dist/
+*.egg-info/
+.venv/
+.vscode/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+
+# 静态检查与覆盖率产物
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
