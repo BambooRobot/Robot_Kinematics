@@ -48,12 +48,13 @@ adapters/                 唯一认识外部世界的地方（实现上面的协
   render_text             终端文本（中文宽度对齐、表格、分节线）
   render_json             同一份 Report 输出 JSON
   plot_mpl                matplotlib 出图 + 3D 不可用时的三视图回退
-  reference_rtb          第三方库取数（唯一 import 那两个库的文件）
 
-core/                     纯数学，零 IO、只依赖 numpy
-  rotations  se3  planar2r  chain  panda  ik_solvers  singularity  numerics
-  workspace               工作空间采样估计（可达性预筛：工作空间不是球）
-  exceptions
+core/                     库覆盖不到的那部分（约 200 行）
+  robots                  从库建模型：末端帧、关节限位、link 位置
+  planar2r ★              二连杆解析 FK/IK（库只给一组解，给不出"肘上/肘下"）
+  workspace ★             可达性预筛（库没有这个 API）
+  singularity             SVD 体检 + 库的 manipulability
+  exceptions              领域异常
 ```
 
 **依赖规则**（只允许这几条）：

@@ -51,8 +51,8 @@ def run() -> Report:
     lines.append(f"[OK] numpy: {np.__version__}")
     if int(np.__version__.split(".")[0]) >= 2:
         lines.append(
-            "[WARN] 当前 NumPy >= 2；本项目自己不受影响，但若要跑 `rkin crosscheck`，"
-            '请先执行：pip install "numpy<2" --force-reinstall'
+            "[WARN] 当前 NumPy >= 2；roboticstoolbox 在 numpy 2 下会报 _ARRAY_API not found，"
+            '请执行：pip install "numpy<2" --force-reinstall'
         )
 
     modules_ok = {}
