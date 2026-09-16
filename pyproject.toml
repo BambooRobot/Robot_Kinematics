@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "robotkinematics"
 dynamic = ["version"]
-description = "具身智能机器人学基础（第一章）的完整实现：位姿 → 变换链 → FK → IK → 雅可比 → 奇异点 → 冗余 → 抓取任务流水线"
+description = "抓取任务流水线：把机器人运动学的七个知识点串成七道工序（运动学由 spatialmath + roboticstoolbox 提供）"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -20,16 +20,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "numpy<2",        # 与课件 requirements 一致；roboticstoolbox 在 numpy 2 下会报 _ARRAY_API not found
+    # 运动学（FK / IK / 雅可比 / 限位）由这两个库提供 —— 本项目不自己实现它们
+    "spatialmath-python>=1.1",
+    "roboticstoolbox-python>=1.0",
+    # numpy<2：roboticstoolbox 在 numpy 2 下会报 _ARRAY_API not found（与课件环境一致）
+    "numpy<2",
     "matplotlib>=3.5",
     "PyYAML>=6",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "mypy>=1.8"]
-# 只在 `rkin crosscheck` 时需要：把自研结果与课件用的真库逐项对照。
-# 不装也能跑全部功能，crosscheck 会打印跳过原因。
-crosscheck = ["spatialmath-python", "roboticstoolbox-python"]
 
 [project.scripts]
 rkin = "robotkinematics.cli.main:main"

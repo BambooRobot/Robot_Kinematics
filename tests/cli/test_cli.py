@@ -44,8 +44,8 @@ def test_unreachable_target_exits_nonzero_with_a_clear_message(capsys):
 
 def test_jacobian_singularity_is_explained_not_crashed(capsys):
     code, out, _ = run_cli(capsys, "jac", "--q1", "0", "--q2", "0", "--dx", "0", "0.1")
-    assert code == 0
-    assert "det(J) = 0.000000" in out
+    assert code == 0  # 奇异是"报告"，不是"崩溃"
+    assert "0.000000" in out and "奇异" in out
 
 
 def test_cam_all_lists_every_case(capsys):

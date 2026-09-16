@@ -14,10 +14,9 @@ from __future__ import annotations
 import numpy as np
 
 from ..contracts import CaseSource, Report, TextBlock, fmt_condition
-from ..core import panda
+from ..core import robots
 from ..core.planar2r import Planar2R
-from ..core.se3 import SE3
-from ..core.singularity import analyze
+from ..core.singularity import analysis_of
 
 DEG = np.deg2rad
 OUTPUT_NAME = "ppt_cases_batch_result.txt"
@@ -38,9 +37,9 @@ def run(source: CaseSource) -> Report:
 
     lines.append("")
     lines.append("3) Franka Panda（课件未纳入这一段，本项目补上）")
-    chain = panda.panda_urdf_chain()
+    robot = robots.panda(robots.TCP)
     for case in source.panda_cases():
-        lines.append(f"- {case.case_id}: {_panda_case(chain, case)}")
+        lines.append(f"- {case.case_id}: {_panda_case(robot, case)}")
 
     return Report(
         title="批量算例报告（第 1、2 段与课件输出逐字符一致）",
@@ -51,8 +50,10 @@ def run(source: CaseSource) -> Report:
 
 
 def _coordinate_case(case) -> np.ndarray:
+    from spatialmath import SE3
+
     T_base_camera = SE3.Trans(*case.camera_xyz) * SE3.Rz(DEG(case.camera_yaw_deg))
-    return (T_base_camera * SE3.Trans(*case.cup_xyz)).t
+    return np.asarray((T_base_camera * SE3.Trans(*case.cup_xyz)).t, dtype=float)
 
 
 def _two_link_case(case) -> str:
@@ -69,9 +70,11 @@ def _two_link_case(case) -> str:
     return f"IK sols={text}"
 
 
-def _panda_case(chain, case) -> str:
-    tool = chain.fk(case.q)
-    report = analyze(chain.jacobian(case.q))
+def _panda_case(robot, case) -> str:
+    # 位置与雅可比都用**夹爪 TCP 帧**（= 库的默认末端）：两者必须同帧，否则数字没法对照。
+    # 课件的 run_logs 记的也是这一帧。
+    tool = robots.end_pose(robot, case.q, robots.TCP)
+    report = analysis_of(robot, case.q)
     state = "奇异" if report.is_singular else ("接近奇异" if report.is_near_singular else "正常")
     return (
         f"tool={np.round(tool.t, 4)}, σmin={report.sigma_min:.3e}, "

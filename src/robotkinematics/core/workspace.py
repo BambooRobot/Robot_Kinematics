@@ -1,19 +1,17 @@
 """@file workspace.py
-@brief 工作空间的采样估计：沿某个方向"最远能到哪里"。
+@brief 可达性估计：沿某个方向"最远能到哪里" —— 库没有这个 API，靠采样。
 
-【为什么需要它】IK 迭代失败时，你只知道"没解出来"，不知道是"根本够不着"还是"初值不好"。
-先做一次工作空间预筛就能把这两种情况分开 —— 而处置方式完全不同：
-前者要挪目标，后者换个初值可能就成了。
+【为什么库给不了】robotics toolbox 的 `robot.reach` 实测对本项目的模型返回 0，
+它也不提供"沿某方向的可达边界"。而这道工序很有用：
+IK 迭代失败时，你只知道"没解出来"，不知道是"根本够不着"还是"初值不好" ——
+先做一次可达性预筛就能把这两种情况分开，而处置方式完全不同。
 
-【为什么是采样，而不是公式】7 自由度的可达集没有解析边界。采样是唯一现实的做法。
-代价是"边界"只是一个估计值，所以把采样数、随机种子、是否计入关节限位一起返回：
-结论可复现，也可被质疑。⚠️ 也正因如此，工作空间**不是球** ——
-"最大可达半径 1.19 m" 只在某个方向成立，换个方向可能只有 1.09 m。
+【为什么是采样，不是公式】7 自由度的可达集没有解析边界。采样是唯一现实的做法，
+所以结论是一个**估计值**：把采样数、随机种子、是否计入关节限位一起返回，
+可复现、也可被质疑。
 
-【为什么自己写一遍批量 FK】逐次调用 `chain.fk()` 采 8000 个姿态要 1.5 秒，
-放在命令行的预筛里太慢。这里对 N 个姿态同时做一遍串联链乘法（numpy 批量矩阵乘），
-快两个数量级。代价是多了一份 FK 实现 —— 所以 tests/test_workspace.py 里
-有一条断言：批量 FK 与 `chain.fk()` 逐位相等（同"ETS vs MDH"那套交叉验证的思路）。
+⚠️ 采样本身用库的批量 `fkine`（内部向量化）—— 8000 个姿态是毫秒级。
+   本项目只自己写"沿方向取最大投影"这一行判断。
 """
 
 from __future__ import annotations
@@ -21,18 +19,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import roboticstoolbox as rtb
 
-from .chain import SerialChain
-
-# 无关节限位信息时的采样范围：±180°
-DEFAULT_LIMITS = (-np.pi, np.pi)
+from .robots import end_positions
 
 
 @dataclass(frozen=True)
 class ReachEstimate:
     """沿某个方向的可达边界估计。"""
 
-    chain_name: str
+    robot_name: str
     direction: np.ndarray  # 单位向量
     radius: float  # 沿该方向投影的最大值 [m]
     samples: int
@@ -51,60 +47,25 @@ class ReachEstimate:
         )
 
 
-def fk_positions_batch(chain: SerialChain, qs: np.ndarray) -> np.ndarray:
-    """批量正运动学：一次算 N 个姿态的末端位置。返回 (N, 3)。
-
-    ⚠️ 这是 `SerialChain.fk()` 的批量版本，数学必须完全一致
-       （tests/test_workspace.py 会逐位核对）。
-    """
-    qs = np.asarray(qs, dtype=float)
-    if qs.ndim != 2 or qs.shape[1] != chain.n_joints:
-        raise ValueError(f"姿态矩阵形状应为 (N, {chain.n_joints})，收到 {qs.shape}")
-
-    n = qs.shape[0]
-    T = np.tile(np.eye(4), (n, 1, 1))
-    for index, link in enumerate(chain.links):
-        T = T @ link.offset.A
-        if link.motion == "Rz":
-            theta = qs[:, index]
-            c, s = np.cos(theta), np.sin(theta)
-            R = np.zeros((n, 4, 4))
-            R[:, 0, 0] = c
-            R[:, 0, 1] = -s
-            R[:, 1, 0] = s
-            R[:, 1, 1] = c
-            R[:, 2, 2] = 1.0
-            R[:, 3, 3] = 1.0
-        else:  # Tz：沿自身 z 平移
-            R = np.tile(np.eye(4), (n, 1, 1))
-            R[:, 2, 3] = qs[:, index]
-        T = T @ R
-    T = T @ chain.tool.A
-    return T[:, :3, 3]
-
-
 def directional_reach(
-    chain: SerialChain,
+    robot: rtb.Robot,
     direction: np.ndarray,
     *,
     samples: int = 8000,
     seed: int = 0,
     limits: np.ndarray | None = None,
 ) -> ReachEstimate:
-    """沿 `direction` 方向采样估计可达边界。
-
-    limits: (n, 2) 的关节限位数组；None 表示按 ±180° 采样。
-    """
+    """沿 `direction` 方向采样估计可达边界。"""
     direction = np.asarray(direction, dtype=float).reshape(3)
     norm = float(np.linalg.norm(direction))
     if norm < 1e-12:
         raise ValueError("方向向量不能为零")
     direction = direction / norm
 
-    qs = sample_joint_space(chain, samples, seed=seed, limits=limits)
-    projections = fk_positions_batch(chain, qs) @ direction
+    qs = sample_joint_space(robot, samples, seed=seed, limits=limits)
+    projections = end_positions(robot, qs) @ direction
     return ReachEstimate(
-        chain_name=chain.name,
+        robot_name=robot.name or "robot",
         direction=direction,
         radius=float(projections.max()),
         samples=samples,
@@ -114,21 +75,25 @@ def directional_reach(
 
 
 def max_reach(
-    chain: SerialChain, *, samples: int = 8000, seed: int = 0, limits: np.ndarray | None = None
+    robot: rtb.Robot, *, samples: int = 8000, seed: int = 0, limits: np.ndarray | None = None
 ) -> float:
     """采样估计的最大可达距离（所有方向里最大的那一个）。"""
-    qs = sample_joint_space(chain, samples, seed=seed, limits=limits)
-    return float(np.linalg.norm(fk_positions_batch(chain, qs), axis=1).max())
+    qs = sample_joint_space(robot, samples, seed=seed, limits=limits)
+    return float(np.linalg.norm(end_positions(robot, qs), axis=1).max())
 
 
 def sample_joint_space(
-    chain: SerialChain, samples: int, *, seed: int = 0, limits: np.ndarray | None = None
+    robot: rtb.Robot, samples: int, *, seed: int = 0, limits: np.ndarray | None = None
 ) -> np.ndarray:
-    """均匀采样关节空间，返回 (samples, n)。固定 seed，保证结论可复现。"""
+    """均匀采样关节空间，返回 (samples, n)。固定 seed，保证结论可复现。
+
+    limits 形如 (n, 2)；None 表示按 ±180° 采样（"不检查限位"的理想情况）。
+    """
     rng = np.random.default_rng(seed)
+    n = robot.n
     if limits is None:
-        return rng.uniform(*DEFAULT_LIMITS, size=(samples, chain.n_joints))
+        return rng.uniform(-np.pi, np.pi, size=(samples, n))
     limits = np.asarray(limits, dtype=float)
-    if limits.shape != (chain.n_joints, 2):
-        raise ValueError(f"关节限位形状应为 ({chain.n_joints}, 2)，收到 {limits.shape}")
-    return rng.uniform(limits[:, 0], limits[:, 1], size=(samples, chain.n_joints))
+    if limits.shape != (n, 2):
+        raise ValueError(f"关节限位形状应为 ({n}, 2)，收到 {limits.shape}")
+    return rng.uniform(limits[:, 0], limits[:, 1], size=(samples, n))

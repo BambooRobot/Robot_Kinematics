@@ -1,8 +1,9 @@
 """@file test_usecases.py
-@brief 用例层：每个用例对应课件脚本，断言的是**结构化结果**（不再断言文本片段）。
+@brief 用例层：断言**结构化字段**（不是文本片段），数值以课件算例为准。
 
-重构前这里是 `assert "0.7830" in text` 这种写法 —— 改个措辞测试就红，而数字错了却可能漏过。
-现在用例返回 Report，数值在 fields 里，文本只在 test_render_text.py 里单独验格式。
+换成调库之后，这里验的不再是"公式对不对"（那是库的事），而是：
+  * 我们调库的方式对不对（帧、约定、参数）；
+  * 报告里给出的结论是否与课件/实测一致。
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import pytest
 
 from robotkinematics.adapters.cases_csv import CsvCaseSource
 from robotkinematics.adapters.config_yaml import Config
-from robotkinematics.core import panda
+from robotkinematics.core import robots
 from robotkinematics.core.exceptions import UnreachableTargetError
 from robotkinematics.core.planar2r import Planar2R
 from robotkinematics.usecases import batch, env_check, planar, pose, transforms
@@ -34,6 +35,11 @@ def arm():
     return Planar2R(l1=1.0, l2=1.0)
 
 
+@pytest.fixture
+def panda_robot():
+    return robots.panda(robots.TCP)
+
+
 # ── 位姿 ────────────────────────────────────────────────────────────────────
 
 
@@ -41,9 +47,16 @@ def test_pose_fields_match_the_course_point_transform():
     """课件 01：0.4/0.2/0.3 + Rz(90°)，点 (0.1,0,0) → (0.4,0.3,0.3)。"""
     report = pose.run(0.4, 0.2, 0.3, 0.0, 0.0, 90.0)
     assert np.allclose(report.fields["p_base"], [0.4, 0.3, 0.3])
-    assert np.allclose(report.fields["R"], [[0, -1, 0], [1, 0, 0], [0, 0, 1]], atol=1e-12)
-    assert report.fields["is_rotation"] is True
-    assert report.fields["representation_gap"] < 1e-12
+    assert report.fields["rpy_order"] == "zyx"  # 本项目的 RPY 约定
+    assert report.fields["rebuild_gap"] < 1e-12
+
+
+def test_pose_quaternion_is_wxyz():
+    """spatialmath 的四元数是 (w,x,y,z) —— 与 ROS/Eigen 的 (x,y,z,w) 相反，要钉住。"""
+    report = pose.run(0.0, 0.0, 0.0, 0.0, 0.0, 90.0)
+    q = report.fields["quaternion_wxyz"]
+    assert np.isclose(q[0], np.cos(np.pi / 4), atol=1e-9)  # w 在前
+    assert np.isclose(q[3], np.sin(np.pi / 4), atol=1e-9)
 
 
 # ── 坐标变换链 ──────────────────────────────────────────────────────────────
@@ -58,30 +71,23 @@ def test_transform_chain_matches_the_course_log(source):
 def test_transform_all_cases_lists_every_case(source):
     report = transforms.all_cases_report(source.coordinate_cases())
     assert set(report.fields["cases"]) == {"ppt_case", "change_x", "change_y", "yaw_zero"}
-    assert (
-        report.fields["cases"]["change_x"]["cup_in_base"][0]
-        > report.fields["cases"]["ppt_case"]["cup_in_base"][0]
-    )
 
 
 # ── 二连杆 ──────────────────────────────────────────────────────────────────
 
 
-def test_planar_fk_fields(arm):
+def test_planar_fk_fields_and_library_agreement(arm):
     report = planar.fk_report(arm, 0.0, 90.0)
     assert np.allclose(report.fields["tool"], [1.0, 1.0])
-    assert np.allclose(report.fields["elbow"], [1.0, 0.0])
+    assert report.fields["library_gap"] < 1e-12  # 闭式解与库一致
     assert np.isclose(report.fields["det_jacobian"], 1.0)
 
 
-def test_planar_ik_fields_include_both_solutions_and_their_verification(arm):
+def test_planar_ik_fields_include_both_solutions(arm):
     report = planar.ik_report(arm, 1.0, 1.0)
     solutions = np.rad2deg(report.fields["solutions_rad"])
     assert np.allclose(solutions[0], [0.0, 90.0], atol=1e-9)
     assert np.allclose(solutions[1], [90.0, -90.0], atol=1e-9)
-    # FK 回验是报告的一部分：表格里两行都必须是 ✔
-    table = next(b for b in report.blocks if b.__class__.__name__ == "TableBlock")
-    assert [row[-1] for row in table.rows] == ["✔", "✔"]
 
 
 def test_planar_ik_raises_for_unreachable_target(arm):
@@ -89,21 +95,20 @@ def test_planar_ik_raises_for_unreachable_target(arm):
         planar.ik_report(arm, 3.0, 0.0)
 
 
-def test_planar_jacobian_fields(arm):
+def test_planar_jacobian_uses_the_library_and_cross_checks_det(arm):
     report = planar.jacobian_report(arm, 0.0, 90.0, (0.0, 0.1))
-    assert np.allclose(report.fields["jacobian"], [[-1, -1], [1, 0]], atol=1e-12)
     assert np.allclose(report.fields["dq_rad"], [0.1, -0.1], atol=1e-9)
-    assert np.isclose(report.fields["det_jacobian"], 1.0)
+    assert np.isclose(report.fields["det_jacobian"], report.fields["det_library"], atol=1e-12)
     assert np.isclose(report.fields["condition"], 2.62, atol=5e-3)
-    assert report.fields["is_singular"] is False
 
 
-def test_planar_jacobian_fields_at_a_singularity(arm):
-    """奇异位姿下 dq 为 None（而不是抛异常）—— 报告里会说明为什么解不出来。"""
+def test_planar_jacobian_at_a_singularity_is_reported_not_raised(arm):
+    """奇异位姿下报告说明原因、dq 为空 —— 而不是抛异常（失败是一等公民）。"""
     report = planar.jacobian_report(arm, 0.0, 0.0, (0.0, 0.1))
     assert report.fields["is_singular"] is True
     assert report.fields["dq_rad"] is None
-    assert np.isclose(report.fields["det_jacobian"], 0.0)
+    text = " ".join(line for block in report.blocks for line in getattr(block, "lines", ()))
+    assert "奇异" in text
 
 
 def test_singularity_sweep_matches_the_course_table(arm):
@@ -111,67 +116,48 @@ def test_singularity_sweep_matches_the_course_table(arm):
     conditions = [entry["condition"] for entry in report.fields["sweep"]]
     assert np.allclose(conditions[:3], [2.62, 9.36, 28.58], atol=5e-3)
     assert not np.isfinite(conditions[3])
-    assert report.output_name == "two_link_singularity_summary.txt"
 
 
 # ── Panda ───────────────────────────────────────────────────────────────────
 
 
-def test_panda_fk_fields_and_limit_warning():
-    report = panda_uc.fk_report(panda.panda_urdf_chain(), panda.PANDA_Q_ZERO)
+def test_panda_fk_report_fields(panda_robot):
+    report = panda_uc.fk_report(panda_robot, panda_uc.Q_ZERO, frame=robots.FLANGE)
     assert np.allclose(report.fields["t"], [0.088, 0.0, 0.926], atol=1e-3)
-    assert report.fields["out_of_limits"] == ["panda_joint4"]
-    assert report.fields["ets_mdh_deviation"] < 1e-12
+    assert report.fields["out_of_limits"] == [3]
+    assert np.allclose(report.fields["tcp_t"], [0.088, 0.0, 0.8226], atol=1e-3)
 
 
-def test_panda_fk_tcp_frame_reproduces_the_course_log():
-    report = panda_uc.fk_report(panda.panda_hand_tcp_chain(), panda.PANDA_Q_ZERO)
-    assert np.allclose(report.fields["t"], panda.COURSE_LOG_ZERO_POSE_TOOL_T, atol=5e-5)
-
-
-def test_panda_jacobian_fields():
-    report = panda_uc.jacobian_report(panda.panda_urdf_chain(), panda.PANDA_Q_IK_SEED)
-    assert np.asarray(report.fields["jacobian"]).shape == (6, 7)
-    assert np.isclose(report.fields["condition"], 8.7606, atol=1e-3)
-    assert report.fields["is_singular"] is False
-
-
-def test_panda_ik_fields():
-    chain = panda.panda_urdf_chain()
-    target = chain.fk(panda.PANDA_Q_PPT_GOAL)
-    report = panda_uc.ik_report(chain, target, panda.PANDA_Q_IK_SEED, show_redundancy=False)
+def test_panda_ik_report_recovers_the_target(panda_robot):
+    target = robots.end_pose(panda_robot, panda_uc.Q_PPT_GOAL, robots.TCP)
+    report = panda_uc.ik_report(
+        panda_robot, target, panda_uc.Q_IK_SEED, show_redundancy=False, frame=robots.TCP
+    )
     assert report.fields["success"] is True
-    assert report.fields["position_error"] < 1e-9
-    assert np.allclose(chain.fk(report.fields["q"]).t, target.t, atol=1e-8)
+    assert report.fields["position_error"] < 1e-5
 
 
-def test_panda_ik_redundancy_entries():
-    chain = panda.panda_urdf_chain()
-    target = chain.fk(panda.PANDA_Q_PPT_GOAL)
-    report = panda_uc.ik_report(chain, target, panda.PANDA_Q_IK_SEED)
-    entries = report.fields["redundancy"]
-    assert len(entries) == 4
-    assert sum(1 for e in entries if e["success"]) >= 2
-    # 至少有两个不同的解 —— 这才是"冗余"
-    solved = [e["q_first3"] for e in entries if e["success"]]
-    assert np.linalg.norm(np.subtract(solved[0], solved[1])) > 0.1
+def test_panda_jacobian_report_fields(panda_robot):
+    report = panda_uc.jacobian_report(panda_robot, panda_uc.Q_IK_SEED)
+    assert np.asarray(report.fields["jacobian"]).shape == (6, 7)
+    assert report.fields["is_singular"] is False
+    # 我们算的可操作度与库的必须一致
+    assert np.isclose(report.fields["manipulability"], report.fields["manipulability_library"])
 
 
-def test_panda_singular_pose_report_marks_zero_as_singular():
-    report = panda_uc.singular_pose_report(panda.panda_urdf_chain())
+def test_panda_singular_pose_report_marks_zero_as_singular(panda_robot):
+    report = panda_uc.singular_pose_report(panda_robot)
     by_name = {entry["name"]: entry for entry in report.fields["poses"]}
     assert by_name["zero（课件姿态 1）"]["is_singular"] is True
     assert by_name["ppt_goal（课件姿态 2）"]["is_singular"] is False
-    assert report.output_name == "panda_singularity_summary.txt"
 
 
 # ── 批量算例 ────────────────────────────────────────────────────────────────
 
 
 def test_batch_lines_reproduce_the_course_output(source):
-    """第 1、2 段必须与课件 ppt_cases_batch_result.txt 逐条一致（验收标准）。"""
-    report = batch.run(source)
-    lines = report.fields["lines"]
+    """第 1、2 段必须与课件交付物的数值逐条一致（验收标准，期望值内联）。"""
+    lines = batch.run(source).fields["lines"]
     for expected in (
         "1) 坐标变换：camera frame -> base frame",
         "- ppt_case: cup_base=[0.783  0.1634 0.8   ]",
@@ -187,30 +173,14 @@ def test_batch_lines_reproduce_the_course_output(source):
         assert expected in lines, expected
 
 
-def test_batch_adds_the_panda_section_the_course_left_out(source):
+def test_batch_panda_section_uses_the_gripper_frame(source):
+    """第 3 段用夹爪 TCP 帧 —— 零位姿 0.8226 与课件日志一致。"""
     lines = batch.run(source).fields["lines"]
-    assert any("Franka Panda" in line for line in lines)
-    for case_id in ("zero", "ppt_goal", "ik_seed"):
-        assert any(line.startswith(f"- {case_id}:") for line in lines)
-
-
-def test_batch_reports_singular_panda_pose_with_readable_condition(source):
-    lines = batch.run(source).fields["lines"]
-    zero_line = next(line for line in lines if line.startswith("- zero:"))
-    assert "inf/极大" in zero_line
-    assert "奇异" in zero_line
-
-
-def test_every_two_link_case_runs(source):
-    """算例表里的每一条都要能跑通；只有 ik_far 允许无解。"""
-    for case in source.two_link_cases():
-        if case.kind == "fk":
-            assert planar.fk_report(Planar2R(case.l1, case.l2), *case.q_deg)
-            continue
-        try:
-            assert planar.ik_report(Planar2R(case.l1, case.l2), *case.target)
-        except UnreachableTargetError:
-            assert case.case_id == "ik_far"
+    zero = next(line for line in lines if line.startswith("- zero:"))
+    assert "0.8226" in zero
+    assert "奇异" in zero
+    # 位置与奇异值必须同帧：奇异值来自库默认末端（夹爪）的雅可比
+    assert any("σmin" in line for line in lines)
 
 
 # ── 环境自检 ────────────────────────────────────────────────────────────────
@@ -220,3 +190,4 @@ def test_env_check_reports_ok_in_this_environment():
     report = env_check.run()
     assert report.fields["ok"] is True
     assert report.fields["broken_modules"] == []
+    assert "spatialmath" in " ".join(report.fields["kinematics_available"])

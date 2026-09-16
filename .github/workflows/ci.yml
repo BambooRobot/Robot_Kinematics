@@ -49,19 +49,3 @@ jobs:
           grep -qF -- "- ppt_case: cup_base=[0.783  0.1634 0.8   ]" outputs/ppt_cases_batch_result.txt
           grep -qF -- "- fk_60_minus30: FK tool=[1.366 1.366], detJ=-0.500000" outputs/ppt_cases_batch_result.txt
           grep -qF -- "- ik_1_1: IK sols=(0.00°, 90.00°); (90.00°, -90.00°)" outputs/ppt_cases_batch_result.txt
-
-  crosscheck:
-    # 可选依赖的交叉验证单独一个 job：装了真库就逐项对照，用来验证自研数学
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[crosscheck]"
-      - name: 与 spatialmath / roboticstoolbox 逐项对照
-        run: rkin crosscheck

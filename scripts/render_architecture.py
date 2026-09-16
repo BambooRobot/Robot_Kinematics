@@ -67,7 +67,7 @@ LAYERS = [
             "pick.py ★ —— 抓取流水线（七道工序 + 六类结论）",
             "pose / transforms —— 位姿表示、相机 → 本体变换链",
             "planar / panda —— 二连杆与 Panda 的 FK / IK / 雅可比",
-            "batch / compare / env_check —— 批量算例、对照判定、自检",
+            "batch / env_check —— 批量算例、环境自检",
         ],
     ),
     (
@@ -79,19 +79,18 @@ LAYERS = [
             "cases_csv.py —— 读 data/cases/*.csv",
             "render_text / render_json —— 同一份 Report 的两种呈现",
             "plot_mpl.py —— 出图（3D 不可用时回退三视图）",
-            "reference_rtb.py —— 唯一 import 那两个库的文件",
         ],
     ),
     (
         "核心层 · core",
-        "纯数学：零 IO、不认识终端，只依赖 numpy",
+        "库覆盖不到的那部分（★ = 仍然自己写的）；其余运动学全部交给库",
         "core",
         [
-            "rotations / se3 —— SO(3) 与 SE(3)",
-            "planar2r / chain —— 解析 FK/IK · ETS/MDH · 几何雅可比",
-            "panda.py —— 参数、关节限位、夹爪 TCP 帧",
-            "ik_solvers.py —— 阻尼最小二乘 · 零空间次要任务",
-            "singularity / workspace / numerics —— SVD · 可达性采样 · 数值微分",
+            "robots.py —— 从库建模型：末端帧、限位、link 位置",
+            "planar2r.py ★ —— 二连杆解析 FK/IK（库给不出两组解）",
+            "workspace.py ★ —— 可达性采样（库没有这个 API）",
+            "singularity.py —— SVD 体检 + 库的 manipulability",
+            "exceptions.py —— 领域异常（可达 / 收敛 / 奇异）",
         ],
     ),
 ]
@@ -121,7 +120,7 @@ FAILURES = [
 
 CONFIG_CARDS = [
     ("多初值个数", "24", "pick.seeds"),
-    ("残差容差", "1e-6", "pick.residual_tol"),
+    ("残差容差", "1e-4", "pick.residual_tol"),
     ("接近奇异阈值", "0.02", "pick.min_sigma"),
     ("可达性采样", "8000", "pick.workspace_samples"),
     ("限位余量要求", "0.0°", "pick.limit_margin_deg"),
@@ -130,7 +129,7 @@ CONFIG_CARDS = [
 KEY_NUMBERS = (
     "可达边界是采样估计（固定 seed，可复现）：全方向最大 1.19 m，但沿斜下方只有 1.09 m —— 工作空间不是球  ｜  "
     "评分权重 0.5 / 0.3 / 0.2 写在 pick.SCORE_WEIGHTS 里，可审计  ｜  "
-    "265 条断言 · 与 roboticstoolbox 逐项偏差 0.00e+00 ~ 1e-16"
+    "162 条断言 · 自研的两处（闭式解 / 可达采样）均与库逐位对照"
 )
 
 
@@ -461,14 +460,14 @@ def main() -> int:
     ax.text(
         2,
         95.0,
-        "具身智能机器人学基础（第一章）全内容实现 —— 位姿 → 变换链 → FK → IK → 雅可比 → 奇异点 → 冗余 → 抓取任务",
+        "运动学交给 spatialmath + roboticstoolbox；本项目写的是「用它们搭一条会告诉你为什么失败的任务流水线」",
         fontsize=9.5,
         color=MUTED,
     )
     ax.text(
         98,
         98.6,
-        "Python 3.10 · 自研数学（只依赖 numpy）· 265 条断言",
+        "Python 3.10 · spatialmath + roboticstoolbox · 162 条断言",
         fontsize=9,
         color=MUTED,
         ha="right",

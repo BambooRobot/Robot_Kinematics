@@ -2,14 +2,16 @@
 @brief 相机目标 → 机器人本体 —— 对应课件 02_transform_chain_camera_to_base.py 与练习 1。
 
 核心一句话：同一个杯子，换个 frame 表达，数值就变了；杯子一动没动。
+（换成 spatialmath 之后，这一节几乎只是把 `SE3` 换成库的 `SE3` —— 因为本项目当初就
+ 刻意对齐了它的 API 命名：Trans / Rz / .t / .A / 乘法复合。）
 """
 
 from __future__ import annotations
 
 import numpy as np
+from spatialmath import SE3
 
 from ..contracts import MatrixBlock, Report, TableBlock, TextBlock, VectorBlock, fmt_vector
-from ..core.se3 import SE3
 
 DEG = np.deg2rad
 
@@ -18,7 +20,7 @@ def build_chain(case) -> tuple[SE3, SE3, SE3]:
     """返回 (^base T_camera, ^camera T_cup, ^base T_cup)。
 
     这是这个用例里唯一的"数学"，放在函数里而不是塞进报告函数，
-    既方便测试，也方便别的用例（比如将来做抓取规划）复用。
+    既方便测试，也方便别的用例（比如抓取流水线）复用。
     """
     T_base_camera = SE3.Trans(*case.camera_xyz) * SE3.Rz(DEG(case.camera_yaw_deg))
     T_camera_cup = SE3.Trans(*case.cup_xyz)
@@ -54,7 +56,7 @@ def case_report(case) -> Report:
             "base_camera": T_base_camera.A,
             "camera_cup": T_camera_cup.A,
             "base_cup": T_base_cup.A,
-            "cup_in_base": T_base_cup.t,
+            "cup_in_base": np.asarray(T_base_cup.t, dtype=float),
         },
     )
 
@@ -72,16 +74,13 @@ def all_cases_report(cases: list, reference_id: str = "ppt_case") -> Report:
         deltas = tuple(
             (
                 case.case_id,
-                fmt_vector(results[case.case_id].t - reference.t),
+                fmt_vector(np.asarray(results[case.case_id].t) - np.asarray(reference.t)),
             )
             for case in cases
             if case.case_id != reference_id
         )
         blocks += [
-            TextBlock.of(
-                "",
-                f"以 {reference_id} 为基准（位置 {fmt_vector(reference.t)}）：",
-            ),
+            TextBlock.of("", f"以 {reference_id} 为基准（位置 {fmt_vector(reference.t)}）："),
             TableBlock(("算例", "相对基准的变化量"), deltas, ("<", ">")),
             TextBlock.of(
                 "",
@@ -95,7 +94,7 @@ def all_cases_report(cases: list, reference_id: str = "ppt_case") -> Report:
         fields={
             "cases": {
                 case.case_id: {
-                    "cup_in_base": results[case.case_id].t,
+                    "cup_in_base": np.asarray(results[case.case_id].t, dtype=float),
                     "description": case.description,
                 }
                 for case in cases

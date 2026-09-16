@@ -28,9 +28,9 @@ with warnings.catch_warnings():
 
 import numpy as np
 
-from ..core.chain import SerialChain
+from ..core import robots
 from ..core.planar2r import Planar2R
-from ..core.workspace import directional_reach
+from ..core.workspace import directional_reach, max_reach
 
 CJK_CANDIDATES = (
     "Noto Sans CJK JP",
@@ -153,7 +153,7 @@ def animate_two_link(
     return path
 
 
-def plot_panda_skeleton(chain: SerialChain, q: np.ndarray, outputs_dir: str | Path) -> Path:
+def plot_panda_skeleton(robot, q: np.ndarray, outputs_dir: str | Path) -> Path:
     """Panda 骨架图：环境支持就用 3D，不支持就退回三视图（都是同一份数据）。"""
     configure_chinese_font()
     available, reason = _axes3d_available()
@@ -166,10 +166,10 @@ def plot_panda_skeleton(chain: SerialChain, q: np.ndarray, outputs_dir: str | Pa
             "（或卸载系统的 python3-matplotlib），或改用虚拟环境。",
             file=sys.stderr,
         )
-        return _plot_panda_three_views(chain, q, outputs_dir)
+        return _plot_panda_three_views(robot, q, outputs_dir)
 
-    points = chain.fk_positions(q)
-    bound = _reach_bound(chain)
+    points = robots.link_points(robot, q)
+    bound = _reach_bound(robot)
 
     figure = plt.figure(figsize=(7.2, 7.2))
     axes = figure.add_subplot(projection="3d")
@@ -208,14 +208,14 @@ def plot_panda_skeleton(chain: SerialChain, q: np.ndarray, outputs_dir: str | Pa
     return path
 
 
-def _plot_panda_three_views(chain: SerialChain, q: np.ndarray, outputs_dir: str | Path) -> Path:
+def _plot_panda_three_views(robot, q: np.ndarray, outputs_dir: str | Path) -> Path:
     """正交三视图（俯视 XY / 主视 XZ / 侧视 YZ）—— 机械图纸的读法，不依赖 3D 模块。
 
     ⚠️ 每个视图都保持等比例（否则长度会骗人），但视野按各自的数据范围单独取。
     如果所有视图都用统一的大范围，手臂接近平面的姿态会缩成一条线，什么也看不清。
     """
-    points = chain.fk_positions(q)
-    bound = _reach_bound(chain)
+    points = robots.link_points(robot, q)
+    bound = _reach_bound(robot)
     tcp = points[-1]
 
     figure, panels = plt.subplots(1, 3, figsize=(14.0, 5.0), layout="constrained")
@@ -298,11 +298,9 @@ def _finish_2d_axes(axes, arm: Planar2R) -> None:
     axes.legend(loc="upper right", fontsize=8)
 
 
-def _reach_bound(chain: SerialChain) -> float:
-    """末端离原点的距离上界：所有固定平移的长度之和（三角不等式）。"""
-    return sum(float(np.linalg.norm(link.offset.t)) for link in chain.links) + float(
-        np.linalg.norm(chain.tool.t)
-    )
+def _reach_bound(robot, samples: int = 4000) -> float:
+    """末端离原点的距离上界 —— 采样估计（库的 `robot.reach` 实测返回 0，用不了）。"""
+    return max_reach(robot, samples=samples)
 
 
 def _axes3d_available() -> tuple[bool, str]:
@@ -340,11 +338,11 @@ class MatplotlibPlotter:
     def plot_two_link(self, arm, q1_deg: float, q2_deg: float, target=None) -> Path:
         return plot_two_link(arm, q1_deg, q2_deg, self.outputs_dir, target=target)
 
-    def plot_panda_skeleton(self, chain, q) -> Path:
-        return plot_panda_skeleton(chain, q, self.outputs_dir)
+    def plot_panda_skeleton(self, robot, q) -> Path:
+        return plot_panda_skeleton(robot, q, self.outputs_dir)
 
-    def plot_pick_result(self, task, result, chain) -> Path:
-        return plot_pick_result(task, result, chain, self.outputs_dir)
+    def plot_pick_result(self, task, result, robot) -> Path:
+        return plot_pick_result(task, result, robot, self.outputs_dir)
 
     def animate_two_link(self, arm, sweep: str, frames: int, q1_deg: float, q2_deg: float) -> Path:
         return animate_two_link(
@@ -357,7 +355,7 @@ class MatplotlibPlotter:
         )
 
 
-def plot_pick_result(task, result, chain, outputs_dir: str | Path = "outputs") -> Path:
+def plot_pick_result(task, result, robot, outputs_dir: str | Path = "outputs") -> Path:
     """抓取任务图：一张图里放四样东西（愿景里的"四个要素"）。
 
       a. 工作空间切片 —— 该平面内各方向的可达边界（采样估计）
@@ -372,18 +370,18 @@ def plot_pick_result(task, result, chain, outputs_dir: str | Path = "outputs") -
     horizontal = task.arm == "planar"  # 二连杆在 x-y 平面里动
 
     figure, axes = plt.subplots(figsize=(8.2, 7.4))
-    _draw_reachable_slice(axes, chain, horizontal=horizontal)
+    _draw_reachable_slice(axes, robot, horizontal=horizontal)
 
     # b. 机械臂姿态
     if result.q is not None:
-        points = chain.fk_positions(result.q)
+        points = robots.link_points(robot, result.q)
         px, py = _project(points, horizontal)
         axes.plot(px, py, "-o", lw=4, ms=6, color="#2563eb", label="解出的姿态", zorder=4)
         axes.plot(px[0], py[0], "s", ms=12, color="#111827", label="base", zorder=5)
         axes.plot(px[-1], py[-1], "*", ms=20, color="#16a34a", label="末端（解）", zorder=6)
 
         # c. 末端路径 + d. 奇异点标记
-        _draw_motion_trace(axes, chain, result.q, horizontal=horizontal)
+        _draw_motion_trace(axes, robot, result.q, horizontal=horizontal)
 
     # 目标点
     tx, ty = _project(np.asarray(result.target.t).reshape(1, 3), horizontal)
@@ -419,7 +417,7 @@ def _project(points: np.ndarray, horizontal: bool) -> tuple[np.ndarray, np.ndarr
 
 
 def _draw_reachable_slice(
-    axes, chain, *, horizontal: bool, directions: int = 48, samples: int = 3000
+    axes, robot, *, horizontal: bool, directions: int = 48, samples: int = 3000
 ):
     """该平面内各方向的可达边界（采样估计）—— 用来说明"工作空间不是球"。"""
     angles = np.linspace(0.0, 2.0 * np.pi, directions, endpoint=False)
@@ -430,7 +428,7 @@ def _draw_reachable_slice(
             if not horizontal
             else np.array([np.cos(angle), np.sin(angle), 0.0])
         )
-        radii.append(directional_reach(chain, direction, samples=samples).radius)
+        radii.append(directional_reach(robot, direction, samples=samples).radius)
     radii_array = np.asarray(radii)
     xs = radii_array * np.cos(angles)
     ys = radii_array * np.sin(angles)
@@ -438,17 +436,17 @@ def _draw_reachable_slice(
     axes.fill(xs, ys, color="#e5e7eb", alpha=0.35, zorder=1)
 
 
-def _draw_motion_trace(axes, chain, q_goal: np.ndarray, *, horizontal: bool, steps: int = 40):
+def _draw_motion_trace(axes, robot, q_goal: np.ndarray, *, horizontal: bool, steps: int = 40):
     """从零位形到解位形的关节空间直线插值：末端轨迹 + 沿途的奇异程度。"""
     from ..core.singularity import analyze
 
     q_start = np.zeros_like(q_goal)
     weights = np.linspace(0.0, 1.0, steps)[:, None]
     qs = q_start + weights * (q_goal - q_start)
-    points = np.array([chain.fk(q).t for q in qs])
+    points = robots.end_positions(robot, qs)
     xs, ys = _project(points, horizontal)
 
-    sigma_min = np.array([analyze(chain.jacobian(q)).sigma_min for q in qs])
+    sigma_min = np.array([analyze(robot.jacob0(q)).sigma_min for q in qs])
     # 用颜色区分"沿途有没有接近奇异"：正常点灰、接近奇异的点红
     threshold = max(float(sigma_min.max()) * 0.1, 1e-9)
     risky = sigma_min < threshold

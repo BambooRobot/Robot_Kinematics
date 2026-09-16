@@ -10,12 +10,13 @@ cd "$ROOT"
 if command -v rkin >/dev/null 2>&1; then
     RKIN=(rkin)
 else
-    RKIN=(env "PYTHONPATH=$ROOT/src" python3 -m robotkinematics)
+    # 追加而不是覆盖：调用方已有的 PYTHONPATH 要保留（否则会屏蔽掉用户的环境设置）
+    RKIN=(env "PYTHONPATH=${PYTHONPATH:+$PYTHONPATH:}$ROOT/src" python3 -m robotkinematics)
 fi
 
 step() { printf '\n\033[1;34m===== %s =====\033[0m\n' "$*"; }
 
-step "0. 环境自检"
+step "0. 环境自检（含运动学库 spatialmath / roboticstoolbox）"
 "${RKIN[@]}" check
 
 step "1. 位姿表示与坐标变换"
@@ -41,9 +42,11 @@ step "4. Franka Panda"
 step "4.5 抓取任务流水线（七个知识点串成一条）"
 "${RKIN[@]}" pick --observe 0.2 0 0 --plot
 "${RKIN[@]}" pick --observe 0.2 0 0 --arm planar --plot
-echo "—— 失败也是结论：下面两条分别给出「姿态不可达」与「所有解越关节限位」"
-"${RKIN[@]}" pick --observe 0.35 -0.05 0.15 | sed -n '1,8p' || true
-"${RKIN[@]}" pick --observe 0.35 -0.05 0.15 --rpy 0 0 0 | sed -n '1,8p' || true
+echo "—— 失败也是结论：同一个目标、只换抓取姿态，结论就不同"
+echo "   （自上而下抓）"
+"${RKIN[@]}" pick --observe 0.35 -0.05 0.15 2>/dev/null | grep -E "^结论|^原因" || true
+echo "   （换成侧面接近）"
+"${RKIN[@]}" pick --observe 0.35 -0.05 0.15 --rpy 0 90 0 2>/dev/null | grep -E "^结论|^原因" || true
 
 step "5. 出图与动画"
 "${RKIN[@]}" anim --sweep q2 --frames 48
@@ -52,10 +55,7 @@ step "5. 出图与动画"
 step "6. 批量算例报告"
 "${RKIN[@]}" batch
 
-step "7. 交叉验证（没装可选依赖会明确跳过）"
-"${RKIN[@]}" crosscheck
-
-step "8. 测试"
+step "7. 测试"
 python3 -m pytest -q
 
 step "完成：产物清单"

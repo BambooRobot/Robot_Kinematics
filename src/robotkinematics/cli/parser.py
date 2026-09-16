@@ -45,7 +45,8 @@ def _add_config_overrides(parser: argparse.ArgumentParser, suppress: bool = Fals
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rkin",
-        description="自研 SE3 / 正逆运动学 / 雅可比 —— 具身智能机器人学基础（第一章）全内容实现",
+        description="抓取任务流水线：七道工序把机器人运动学的七个知识点串成一条链"
+        "（运动学由 spatialmath + roboticstoolbox 提供）",
     )
     parser.add_argument(
         "--config",
@@ -192,8 +193,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pick.add_argument("--seeds", type=int, default=None, help="覆盖多初值个数")
     p_pick.add_argument("--plot", action="store_true", help="额外输出一张任务图")
-
-    sub.add_parser("crosscheck", help="与 spatialmath / roboticstoolbox 交叉验证（需可选依赖）")
 
     # 每个子命令也挂一份覆盖开关，这样 `rkin fk --l1 2 ...` 也能用
     for sub_parser in sub.choices.values():

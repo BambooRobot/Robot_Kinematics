@@ -1,7 +1,11 @@
 # robot_kinematics_app (rkin)
 
-**具身智能机器人学基础（第一章）全内容实现**：位姿描述 → 坐标变换链 → 二连杆 FK/IK/雅可比/奇异点 →
-7 自由度 Franka Panda。核心数学全部自研（只需要 numpy），不依赖 `spatialmath` / `roboticstoolbox`。
+**一条抓取任务流水线**：把机器人运动学的七个知识点串成七道工序 ——
+观测 → 可达性预筛 → 多初值 IK → 雅可比体检 → 限位校验 → 解择优 → 微动校验，
+**并且会告诉你为什么失败**（六类失败结论，有名字、有数字）。
+
+运动学（FK / IK / 雅可比 / 关节限位）由 `spatialmath` + `roboticstoolbox` 提供；
+本项目写的是"用它们搭一条任务流水线"——可达性预筛、失败分类、解择优、微动校验，库都不提供。
 
 > 📖 **第一次接触本项目 / 没学过机器人学？**
 > 先读 [`docs/GUIDE.md`](docs/GUIDE.md) —— 面向初学者的从零指南，
@@ -13,9 +17,11 @@
 
 ## 这个项目解决什么问题
 
-课件里那套实验（`0625robotics_python_lab_cloud_terminal`）把 FK/IK/雅可比的公式在 4 个脚本里
-各抄了一份，Panda 部分直接调库，`panda_cases.csv` 声明了却没有任何脚本读它。
-本项目把同样的内容重写成一套分层、可测试、可出图的工程，并且**每个数都是自己算的**：
+课件里那套实验（`0625robotics_python_lab_cloud_terminal`）是 12 个扁平脚本：公式在 4 个脚本里
+各抄一份、Panda 部分直接调库、`panda_cases.csv` 声明了却没有任何脚本读它 —— 而且
+**每一步都是孤立的**：算了 FK 不会用去判可达，解了 IK 不知道这组解能不能执行。
+
+本项目把它们重写成一套分层、可测试的工程，核心是**一条流水线**：
 
 ```text
 cli/                      组合根：造适配器 → 调用例 → 交给渲染器
@@ -75,11 +81,10 @@ core/                     纯数学，零 IO、只依赖 numpy
 ## 依赖
 
 - Python ≥ 3.10
-- numpy < 2（与课件一致；仅 `crosscheck` 需要这个约束）
-- matplotlib ≥ 3.5、PyYAML ≥ 6（运行时）
+- **运动学库**：`spatialmath-python` + `roboticstoolbox-python`（FK / IK / 雅可比 / 限位）
+- numpy < 2（roboticstoolbox 在 numpy 2 下会报 `_ARRAY_API not found`）
+- matplotlib ≥ 3.5、PyYAML ≥ 6
 - 开发工具（ruff / mypy / pytest / coverage）：`pip install -e ".[dev]"`
-- **可选**：spatialmath-python、roboticstoolbox-python（只有 `rkin crosscheck` 用得到）：
-  `pip install -e ".[crosscheck]"`
 
 > 依赖只声明在 **`pyproject.toml` 一处**（`dependencies` + `optional-dependencies`），
 > 不另外维护 requirements 文件 —— 两份清单必然漂移。
@@ -126,7 +131,6 @@ rkin panda-jac --case ik_seed                 # 6×7 几何雅可比 + 奇异分
 rkin panda-sing                               # 三个典型姿态的运动能力对比
 rkin anim --sweep q2 --frames 60              # 关节扫动 GIF
 rkin batch                                    # 批量算例报告 → outputs/
-rkin crosscheck                               # 需可选依赖，未安装会说明“已跳过”
 rkin --format json panda-jac                  # 同一份报告输出 JSON（供别的程序调用）
 ```
 
@@ -146,14 +150,12 @@ rkin fk --l1 2 --l2 3 --q1 0 --q2 0     # 等价
 make test-fast            # 6 秒跑完大部分断言（跳过 slow 标记的长搜索用例）
 make check-all            # 提交前跑这条：ruff + mypy + pytest
 bash scripts/run_all.sh   # 跑完全部命令，产物落到 outputs/
-rkin crosscheck           # 可选：装了真库才生效
 ```
 
 判据（详见 `docs/NUMBERS.md`）：
 - `rkin batch` 的前两段与课件 `outputs/ppt_cases_batch_result.txt` **逐字符一致**；
-- 自研雅可比与数值微分的偏差 < 1e-9；ETS 与 MDH 两套参数化的 FK 逐位一致；
-- Panda 的 FK↔IK 往返残差 < 1e-9；
-- `rkin crosscheck`（装可选依赖后）与 roboticstoolbox 逐项对照，偏差 **0.00e+00 ~ 1e-16**；
+- 二连杆的**闭式解与库的 FK 逐位一致**（1e-12），其行列式与库的 `jacob0` 一致；
+- Panda 的 FK↔IK 往返残差 < 1e-5（库的 tol 是关节步长判据，换算到位姿就是这个量级）；
 - `rkin pick` 的六类失败结论各有端到端测试；二连杆解与闭式解逐位一致。
 
 ## 已知环境问题
@@ -164,6 +166,6 @@ rkin crosscheck           # 可选：装了真库才生效
 `/usr/lib/python3/dist-packages/matplotlib-*-nspkg.pth`，或改用虚拟环境。
 两种输出用的是同一份数据，三视图按正交投影画，数值不受影响。
 
-⚠️ 同一个原因还会让 **`spatialmath` 装不上/导入失败**（它依赖 matplotlib 的 3D 模块，
-报 `cannot import name 'plotvol3'`）。也就是说 `rkin crosscheck` 在本机需要先修好上面这一条。
-本项目不依赖这两个库，所以不影响其他任何功能。
+⚠️ **同一个原因会让本项目跑不起来**：`spatialmath` 导入时会连带 matplotlib 的 3D 模块，
+在这个环境下直接报 `cannot import name 'plotvol3'`。而运动学现在由它提供 ——
+所以这条不是"影响出图"，而是**必须先修好才能运行**。

@@ -1,8 +1,10 @@
 """@file planar.py
 @brief 二连杆的 FK / IK / 雅可比 / 奇异点 —— 对应课件 03~07 五个脚本。
 
-课件把它们拆成五个脚本（各自简单，但同一个公式抄了多份）；本项目把数学收在
-core/planar2r.py 一份实现里，这里只负责"报什么"。
+【本用例的分工】二连杆有闭式解，而库只给数值解（见 core/planar2r.py 的说明），所以：
+  * FK / IK（含"肘上/肘下"两组解）= 手推公式（core/planar2r.py）
+  * 雅可比 = 库的 `robot.jacob0(q)`；行列式仍用闭式 `L1·L2·sin(q2)` 与库对照
+  * 奇异点体检 = core/singularity.py（numpy SVD）
 """
 
 from __future__ import annotations
@@ -18,7 +20,8 @@ from ..contracts import (
     fmt_condition,
     fmt_vector,
 )
-from ..core.exceptions import SingularPoseError, UnreachableTargetError
+from ..core import robots
+from ..core.exceptions import UnreachableTargetError
 from ..core.planar2r import Planar2R
 from ..core.singularity import analyze
 
@@ -36,13 +39,14 @@ SWEEP_POSES = [
 def fk_report(arm: Planar2R, q1_deg: float, q2_deg: float, chart: bool = True) -> Report:
     q1, q2 = DEG(q1_deg), DEG(q2_deg)
     base, elbow, tool = arm.joint_points(q1, q2)
+    library_fk = np.asarray(robots.planar(arm.l1, arm.l2).fkine([q1, q2]).t)[:2]
 
     blocks: list = [
         TextBlock.of(
-            f"输入：q1={q1_deg:.1f}°，q2={q2_deg:.1f}°（L1={arm.l1}, L2={arm.l2}）",
+            f"输入：q1={q1_deg:.1f}°，q2={q2_deg:.1f}°（L1={arm.l1:g}, L2={arm.l2:g}）",
             "",
-            "x = L1·cos(q1) + L2·cos(q1+q2)",
-            "y = L1·sin(q1) + L2·sin(q1+q2)",
+            "闭式解（手推）:  x = L1·cos(q1) + L2·cos(q1+q2)",
+            "                y = L1·sin(q1) + L2·sin(q1+q2)",
             "",
             f"base  = {fmt_vector(base)}",
             f"elbow = {fmt_vector(elbow)}   ← 第一段由 q1 决定方向",
@@ -51,6 +55,7 @@ def fk_report(arm: Planar2R, q1_deg: float, q2_deg: float, chart: bool = True) -
             "装配关系：base → joint1(q1) → link1(L1) → joint2(q2) → link2(L2) → tool",
             f"末端到 base 的距离 = {np.linalg.norm(tool):.4f} m"
             f"（可达范围 [{abs(arm.l1 - arm.l2):.4f}, {arm.l1 + arm.l2:.4f}]）",
+            f"与库 FK 的偏差 = {np.abs(library_fk - tool).max():.3e}（闭式解与库互为验证）",
         )
     ]
     if chart:
@@ -67,6 +72,7 @@ def fk_report(arm: Planar2R, q1_deg: float, q2_deg: float, chart: bool = True) -
             "elbow": elbow,
             "tool": tool,
             "det_jacobian": arm.det_jacobian(q2),
+            "library_gap": float(np.abs(library_fk - tool).max()),
         },
     )
 
@@ -100,9 +106,12 @@ def ik_report(arm: Planar2R, x: float, y: float) -> Report:
             TextBlock.of(
                 f"目标点：({x}, {y})",
                 "",
-                "cos(q2) = (x² + y² - L1² - L2²) / (2·L1·L2)",
-                "q2 = ±arccos(cos(q2))          ← ± 号对应两组解",
-                "q1 = atan2(y, x) - atan2(L2·sin(q2), L1 + L2·cos(q2))",
+                "闭式解（余弦定理）：cos(q2) = (x² + y² - L1² - L2²) / (2·L1·L2)",
+                "                   q2 = ±arccos(cos(q2))    ← ± 号对应两组解",
+                "                   q1 = atan2(y, x) - atan2(L2·sin(q2), L1 + L2·cos(q2))",
+                "",
+                "⚠️ 这一步**必须**用手推公式：库的 `ikine_LM` 只返回一组解，",
+                "   而“肘上/肘下两组解”正是本节的考点。",
             ),
             TableBlock(
                 ("解", "q1", "q2", "FK 回验末端", "回到目标"),
@@ -134,28 +143,40 @@ def jacobian_report(
     cond_warn: float = 100.0,
 ) -> Report:
     q1, q2 = DEG(q1_deg), DEG(q2_deg)
-    J = arm.jacobian(q1, q2)
+    robot = robots.planar(arm.l1, arm.l2)
+    J = np.asarray(robot.jacob0([q1, q2]))[:2, :]  # 库的几何雅可比，取平面两行
     report = analyze(J, det_eps=det_eps, cond_warn=cond_warn)
+    det_closed_form = arm.det_jacobian(q2)
+    det_library = float(np.linalg.det(J))
 
     blocks: list = [
         TextBlock.of(
             f"当前 q1={q1_deg:.1f}°，q2={q2_deg:.1f}°",
             "",
-            "J = [ ∂x/∂q1  ∂x/∂q2 ]        Δx ≈ J(q)·Δq",
-            "    [ ∂y/∂q1  ∂y/∂q2 ]",
+            "J = ∂(末端位置)/∂(关节角)   —— 由库的 robot.jacob0(q) 给出",
         ),
         MatrixBlock("", J),
         TextBlock.of(
             f"期望末端小位移 dx = {fmt_vector(dx)}",
-            f"det(J) = {arm.det_jacobian(q2):.6f}   （闭式：L1·L2·sin(q2)）",
+            f"det(J)：闭式 L1·L2·sin(q2) = {det_closed_form:.6f}，"
+            f"库算的 det = {det_library:.6f}（两者应一致）",
             report.summary(),
             f"最难运动的方向：{np.round(report.worst_direction, 4)}",
         ),
     ]
 
     dq = None
-    try:
-        dq = arm.solve_step(q1, q2, np.array(dx), det_eps=det_eps)
+    if report.is_singular:
+        blocks.append(
+            TextBlock.of(
+                "",
+                f"⚠️ 当前位姿接近奇异（q2={q2_deg:.1f}°，det(J)={det_closed_form:.3e}）："
+                "末端在该方向上的瞬时运动能力丧失，解不出可用的关节微调量。",
+                "   这是物理限制，不是程序错误 —— FK 照样算得出来，只是“往某个方向再挪一点”做不到。",
+            )
+        )
+    else:
+        dq = np.linalg.solve(J, np.array(dx, dtype=float))  # 解线性方程组用 numpy
         blocks.append(
             TextBlock.of(
                 "",
@@ -164,8 +185,6 @@ def jacobian_report(
                 "⚠️ J 是当前姿态下的局部线性近似：步长一大就不准了，所以它只适合“小步微调”。",
             )
         )
-    except SingularPoseError as exc:
-        blocks.append(TextBlock.of("", f"⚠️ {exc}"))
 
     return Report(
         title="二连杆雅可比（末端想微调，关节该怎么动）",
@@ -174,7 +193,8 @@ def jacobian_report(
             "q_deg": [q1_deg, q2_deg],
             "jacobian": J,
             "dx": list(dx),
-            "det_jacobian": arm.det_jacobian(q2),
+            "det_jacobian": det_closed_form,
+            "det_library": det_library,
             "condition": report.condition,
             "manipulability": report.manipulability,
             "sigma_min": report.sigma_min,
@@ -187,12 +207,13 @@ def jacobian_report(
 
 def singularity_sweep(arm: Planar2R, det_eps: float = 1e-9) -> Report:
     """课件 07 的四姿态扫描表，落盘到 outputs/。"""
-    rows = []
-    sweep_fields = []
+    robot = robots.planar(arm.l1, arm.l2)
+    rows, sweep_fields = [], []
     for q1_deg, q2_deg, name in SWEEP_POSES:
         q1, q2 = DEG(q1_deg), DEG(q2_deg)
         tool = arm.fk(q1, q2)
-        report = analyze(arm.jacobian(q1, q2), det_eps=det_eps)
+        J = np.asarray(robot.jacob0([q1, q2]))[:2, :]
+        report = analyze(J, det_eps=det_eps)
         rows.append(
             (
                 name,
@@ -220,6 +241,7 @@ def singularity_sweep(arm: Planar2R, det_eps: float = 1e-9) -> Report:
         blocks=(
             TextBlock.of(
                 "公式：det(J) = L1 · L2 · sin(q2)。所以 q2 = 0° 或 180° 时两根连杆共线，det(J) = 0。",
+                "（雅可比由库的 jacob0 给出，行列式与闭式公式对照 —— 两者应一致）",
             ),
             TableBlock(
                 ("姿态", "q1", "q2", "tool(x,y)", "det(J)", "cond(J)"),

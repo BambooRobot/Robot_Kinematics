@@ -83,10 +83,3 @@ def test_plotter_satisfies_the_protocol():
     assert isinstance(
         MatplotlibPlotter(), __import__("robotkinematics.contracts", fromlist=["Plotter"]).Plotter
     )
-
-
-def test_reference_adapter_satisfies_the_protocol():
-    from robotkinematics.adapters.reference_rtb import RtbReference
-    from robotkinematics.contracts import KinematicsReference
-
-    assert isinstance(RtbReference(), KinematicsReference)

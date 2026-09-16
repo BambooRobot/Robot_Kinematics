@@ -17,25 +17,24 @@ from ..contracts import Report, TextBlock
 
 # 本项目自己的一整套模块：任何一个导入失败，后面所有命令都会失败
 SELF_MODULES = [
-    "robotkinematics.core.rotations",
-    "robotkinematics.core.se3",
+    "robotkinematics.core.robots",
     "robotkinematics.core.planar2r",
-    "robotkinematics.core.chain",
-    "robotkinematics.core.panda",
-    "robotkinematics.core.ik_solvers",
+    "robotkinematics.core.workspace",
     "robotkinematics.core.singularity",
-    "robotkinematics.core.numerics",
+    "robotkinematics.core.exceptions",
     "robotkinematics.contracts",
     "robotkinematics.usecases.pose",
+    "robotkinematics.usecases.transforms",
     "robotkinematics.usecases.planar",
     "robotkinematics.usecases.panda",
+    "robotkinematics.usecases.pick",
     "robotkinematics.adapters.config_yaml",
     "robotkinematics.adapters.cases_csv",
     "robotkinematics.adapters.render_text",
 ]
 
-# 只有交叉验证需要的库
-OPTIONAL_MODULES = [
+# 运动学依赖：现在是**必需**的（本项目把数学交给了库）
+KINEMATICS_MODULES = [
     ("spatialmath", "spatialmath-python"),
     ("roboticstoolbox", "roboticstoolbox-python"),
 ]
@@ -44,8 +43,8 @@ OPTIONAL_MODULES = [
 def run() -> Report:
     lines = [
         f"Python: {sys.version.split()[0]} ({platform.platform()})",
-        "说明：本项目的核心数学全部自研，不依赖 spatialmath / roboticstoolbox；",
-        "     那两个库只用于 `rkin crosscheck` 的交叉验证，没有也能跑全部功能。",
+        "说明：运动学（FK / IK / 雅可比 / 限位）由 spatialmath + roboticstoolbox 提供；",
+        "     本项目自己写的是「用它们搭一条任务流水线」（可达性、择优、失败分类）。",
     ]
     ok = True
 
@@ -79,16 +78,16 @@ def run() -> Report:
     if not self_broken:
         lines.append(f"[OK] 本项目 {len(SELF_MODULES)} 个模块全部可导入")
 
-    optional_available = []
-    for module_name, package in OPTIONAL_MODULES:
+    kinematics_available = []
+    for module_name, package in KINEMATICS_MODULES:
         try:
             module = importlib.import_module(module_name)
-            lines.append(
-                f"[OK] {package}: {getattr(module, '__version__', '未知')}（crosscheck 可用）"
-            )
-            optional_available.append(package)
-        except ImportError:
-            lines.append(f"[--] {package}: 未安装（crosscheck 会跳过，不影响其他功能）")
+            lines.append(f"[OK] {package}: {getattr(module, '__version__', '未知')}")
+            kinematics_available.append(package)
+        except ImportError as exc:
+            ok = False
+            lines.append(f"[MISSING] {package}: {exc}")
+            lines.append('         请执行：pip install -e .  （或 pip install -e ".[dev]"）')
 
     lines.append("")
     lines.append("环境检查完成，可以开始实战。" if ok else "有依赖缺失，请先执行：pip install -e .")
@@ -101,6 +100,6 @@ def run() -> Report:
             "numpy": np.__version__,
             "ok": ok,
             "broken_modules": self_broken,
-            "optional_available": optional_available,
+            "kinematics_available": kinematics_available,
         },
     )
