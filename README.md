@@ -24,32 +24,34 @@
 本项目把它们重写成一套分层、可测试的工程，核心是**一条流水线**：
 
 ```text
-cli/                      组合根：造适配器 → 调用例 → 交给渲染器
-  parser                  参数定义（只有开关，没有业务）
-  commands                装配 + 派发（想知道某条命令用了哪些实现，只看这里）
-  main                    渲染 + 唯一的异常出口
+main.py                   ★ 唯一入口 = 组合根，按四段读：
+                          ① 命令表（命令 → 处理函数）② 装配（唯一一处"选实现"）
+                          ③ 入口流程（解析→装配→查表→执行→渲染）④ 异常出口
+                          想知道"这个程序用到哪些实现"，只看这一个文件
 
-usecases/                 用例：编排 + 产出 Report（不认识终端/文件/matplotlib）
-  pick                    ★ 抓取任务流水线：七道工序 + 六类失败结论（把七个知识点串起来）
+usecases/                 用例：一条命令 = 一个函数（依赖全靠参数传入，不认识终端/文件）
+  pick                    ★ 抓取任务流水线（门面：工序序列 + 执行器）
+  pick_types                └ 词汇与数据契约：结论常量、Task/Params/Candidate/Result
+  pick_steps                └ 七道工序：每道一个函数，失败时自己归类
+  pick_report               └ 报什么（Report 的结构；怎么画是适配器的事）
   pose                    位姿的几种表示互转（对应课件 01）
   transforms              相机目标 → 机器人本体（对应课件 02）
   planar                  二连杆 FK/IK/雅可比/奇异点（对应课件 03~07）
   panda                   Panda FK/IK/雅可比/冗余（对应课件 08~10）
   batch                   批量算例报告（对应课件 11，并补上 Panda 段）
-  compare                 与第三方库交叉验证的判定逻辑
   env_check               环境自检（对应课件 00）
 
 contracts.py              契约：Report / 报告块 + 4 个协议
                           Renderer · CaseSource · Plotter · KinematicsReference
 
 adapters/                 唯一认识外部世界的地方（实现上面的协议）
-  config_yaml             YAML 配置：未知项告警 + 范围校验 + 命令行覆盖
+  config_yaml             YAML 配置：未知项告警 + 范围校验 + 命令行覆盖 + 路径解析
   cases_csv               读 data/cases/*.csv
-  render_text             终端文本（中文宽度对齐、表格、分节线）
+  render_text             终端文本（中文宽度对齐、表格、分节线 —— 布局都在这里）
   render_json             同一份 Report 输出 JSON
   plot_mpl                matplotlib 出图 + 3D 不可用时的三视图回退
 
-core/                     库覆盖不到的那部分（约 200 行）
+core/                     库覆盖不到的那部分（约 500 行）
   robots                  从库建模型：末端帧、关节限位、link 位置
   planar2r ★              二连杆解析 FK/IK（库只给一组解，给不出"肘上/肘下"）
   workspace ★             可达性预筛（库没有这个 API）
@@ -57,14 +59,17 @@ core/                     库覆盖不到的那部分（约 200 行）
   exceptions              领域异常
 ```
 
-**依赖规则**（只允许这几条）：
+**依赖规则**（只允许这几条，**由 `tests/test_architecture.py` 守着 —— 违反了会红**）：
 
 | 从 | 到 | 说明 |
 |---|---|---|
-| `cli` | 全部 | 组合根，负责装配 |
+| `main.py` | 全部 | 组合根：**唯一**允许"造具体实现"的地方 |
 | `usecases` | `core` / `contracts` | **不允许**直接依赖 `adapters` |
 | `adapters` | `contracts` / `core` / 第三方库 | 实现协议 |
-| `core` | 只有 numpy | 数学 |
+| `core` | numpy + 运动学库 | 只做数学与模型构造，不认识契约、不做 IO |
+
+还有一条不是靠 import 而是靠"读代码顺序"的规矩：**除了 `main.py`，任何文件里都不该出现
+"造一个具体实现"** —— 于是"换成 JSON 渲染器""换个算例来源"都只改 `build_context` 一处。
 
 用例产出的是 `Report`（结构化），所以同一份结果既能走终端，也能 `rkin --format json` 出 JSON。
 

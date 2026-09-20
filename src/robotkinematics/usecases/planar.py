@@ -1,4 +1,5 @@
 """@file planar.py
+
 @brief 二连杆的 FK / IK / 雅可比 / 奇异点 —— 对应课件 03~07 五个脚本。
 
 【本用例的分工】二连杆有闭式解，而库只给数值解（见 core/planar2r.py 的说明），所以：
@@ -37,6 +38,14 @@ SWEEP_POSES = [
 
 
 def fk_report(arm: Planar2R, q1_deg: float, q2_deg: float, chart: bool = True) -> Report:
+    """@brief 正运动学报告：关节角 → 三个关节点，并顺手和库的 FK 对一遍。
+
+    @param arm 二连杆几何（L1、L2）
+    @param q1_deg 关节 1 角度 [°]
+    @param q2_deg 关节 2 角度 [°]
+    @param chart 是否附一张字符画（终端里也能看出姿态）
+    @return 报告；fields["library_gap"] 是闭式解与库 FK 的偏差 —— 两个独立来源互为验证
+    """
     q1, q2 = DEG(q1_deg), DEG(q2_deg)
     base, elbow, tool = arm.joint_points(q1, q2)
     library_fk = np.asarray(robots.planar(arm.l1, arm.l2).fkine([q1, q2]).t)[:2]
@@ -78,6 +87,14 @@ def fk_report(arm: Planar2R, q1_deg: float, q2_deg: float, chart: bool = True) -
 
 
 def ik_report(arm: Planar2R, x: float, y: float) -> Report:
+    """@brief 逆运动学报告：目标点 → **全部**关节解（肘上 / 肘下），再逐组回代 FK 验算。
+
+    @param arm 二连杆几何
+    @param x 目标点 x [m]
+    @param y 目标点 y [m]
+    @return 报告；fields["solutions_deg"] 按肘上、肘下的顺序给出两组解
+    @throws UnreachableTargetError 目标落在 [|L1-L2|, L1+L2] 之外 —— 物理上够不着，不是 bug
+    """
     solutions = arm.ik(x, y)
     if not solutions:
         raise UnreachableTargetError(
@@ -142,6 +159,19 @@ def jacobian_report(
     det_eps: float = 1e-9,
     cond_warn: float = 100.0,
 ) -> Report:
+    """@brief 雅可比报告：末端想微调 dx，关节该动多少 —— 并在奇异位姿上如实报告解不出来。
+
+    矩阵由库的 `jacob0` 给出，行列式同时用闭式 L1·L2·sin(q2) 对照（两者应一致）。
+    非奇异时解 J·dq = dx 给出 dq；奇异时不硬解，只说明"这是能力丧失，不是程序错误"。
+
+    @param arm 二连杆几何
+    @param q1_deg 当前关节 1 角度 [°]
+    @param q2_deg 当前关节 2 角度 [°]
+    @param dx 期望的末端小位移 (dx, dy) [m]
+    @param det_eps σ_min 低于它就判为奇异
+    @param cond_warn 条件数高于它就判为"接近奇异"
+    @return 报告；fields["dq_deg"] 在奇异位姿下为 None
+    """
     q1, q2 = DEG(q1_deg), DEG(q2_deg)
     robot = robots.planar(arm.l1, arm.l2)
     J = np.asarray(robot.jacob0([q1, q2]))[:2, :]  # 库的几何雅可比，取平面两行

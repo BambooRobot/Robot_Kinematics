@@ -1,4 +1,5 @@
 """@file panda.py
+
 @brief Franka Panda 的 FK / IK / 雅可比 —— 对应课件 08~10 三个脚本。
 
 课件这三个脚本本来就是"调用库"（robot.fkine / ikine_LM / jacob0），
@@ -49,6 +50,13 @@ COURSE_LOG_ZERO_TCP = (0.088, 0.0, 0.8226)
 
 
 def fk_report(robot: rtb.Robot, q: np.ndarray, frame: str = robots.FLANGE) -> Report:
+    """@brief 正运动学报告：一组关节角 → 末端位姿，并把"末端是哪个帧"写在明面上。
+
+    @param robot Panda 模型（由 core.robots 构建）
+    @param q 7 个关节角 [rad]
+    @param frame 用哪个末端帧：robots.FLANGE（法兰 panda_link8）或 robots.TCP（夹爪）
+    @return 报告；零位姿时额外对照课件 run_logs 里那条记录 —— 那 0.103 m 的差就是帧的约定
+    """
     q = np.asarray(q, dtype=float).reshape(7)
     T = robots.end_pose(robot, q, frame)
     limits = robots.joint_limits(robot)
@@ -202,6 +210,12 @@ def ik_report(
 
 
 def jacobian_report(robot: rtb.Robot, q: np.ndarray) -> Report:
+    """@brief 几何雅可比报告：6×7 的 J + 奇异体检，并解释"列比行多"是什么意思。
+
+    @param robot Panda 模型
+    @param q 7 个关节角 [rad]
+    @return 报告；fields 里同时给出自算的可操作度（σ 连乘）与库的 yoshikawa 值，两者互为验证
+    """
     q = np.asarray(q, dtype=float).reshape(7)
     J = np.asarray(robot.jacob0(q), dtype=float)
     report = analysis_of(robot, q)

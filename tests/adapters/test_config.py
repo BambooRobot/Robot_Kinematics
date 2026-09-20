@@ -1,4 +1,5 @@
 """@file test_config.py
+
 @brief 配置：默认值、范围校验、未知项告警、命令行覆盖优先级。
 """
 
@@ -34,6 +35,7 @@ def test_default_config_file_loads():
 
 
 def test_yaml_values_override_defaults(tmp_path):
+    """yaml 里写了的项覆盖默认值，没写的项保持默认。"""
     config = Config.from_yaml(_write(tmp_path, VALID_YAML))
     assert config.planar.l1 == 0.7
     assert config.planar.l2 == 1.3
@@ -58,6 +60,7 @@ def test_none_values_in_override_are_ignored(tmp_path):
 
 
 def test_unknown_key_warns_instead_of_silently_ignoring(tmp_path, capsys):
+    """顶层键拼错要告警并忽略，不能让错误配置悄悄生效。"""
     config = Config.from_yaml(_write(tmp_path, VALID_YAML + "\nplaenar:\n  l1: 9.9\n"))
     captured = capsys.readouterr()
     assert "plaenar" in captured.err
@@ -66,6 +69,7 @@ def test_unknown_key_warns_instead_of_silently_ignoring(tmp_path, capsys):
 
 
 def test_unknown_field_inside_a_section_warns(tmp_path, capsys):
+    """段落里拼错的字段同样要告警，且要点名到 planar.l3。"""
     Config.from_yaml(_write(tmp_path, "planar:\n  l1: 1.0\n  l3: 2.0\n"))
     assert "planar.l3" in capsys.readouterr().err
 
@@ -82,27 +86,45 @@ def test_unknown_field_inside_a_section_warns(tmp_path, capsys):
     ],
 )
 def test_out_of_range_values_are_rejected(tmp_path, yaml_text):
+    """越界参数一律拒绝：连杆长度、迭代次数、步长缩放、容差、条件数阈值。"""
     with pytest.raises(KinematicsError):
         Config.from_yaml(_write(tmp_path, yaml_text))
 
 
 def test_non_numeric_value_is_rejected(tmp_path):
+    """非数值配置项要报错，不能糊弄成字符串或 NaN 带进计算。"""
     with pytest.raises(KinematicsError):
         Config.from_yaml(_write(tmp_path, "planar:\n  l1: abc\n"))
 
 
 def test_missing_file_is_reported_clearly(tmp_path):
+    """配置文件不存在时要提示“无法打开配置文件”，而不是抛底层异常。"""
     with pytest.raises(KinematicsError) as excinfo:
         Config.from_yaml(tmp_path / "not-there.yaml")
     assert "无法打开配置文件" in str(excinfo.value)
 
 
 def test_unknown_override_key_is_rejected():
+    """命令行传了不存在的参数要报错，防止笔误被静默吞掉。"""
     with pytest.raises(KinematicsError):
         Config().override(nosuch_field=1)
 
 
 def test_resolve_path_prefers_cwd_then_project_root():
+    """相对路径先按当前目录找、再退回工程根目录；绝对路径原样返回。"""
     assert resolve_path("configs/default.yaml").exists()
     # 绝对路径原样返回
     assert resolve_path("/tmp").as_posix() == "/tmp"
+
+
+def test_project_root_points_at_the_repo_root():
+    """`PROJECT_ROOT` 必须真的指向项目根 —— 上面那条测试守不住它。
+
+    ⚠️ 因为 `resolve_path` 是 **CWD 优先**，而 pytest 都在仓库根跑，
+       `configs/default.yaml` 在 CWD 就命中了，永远走不到 PROJECT_ROOT 那一行。
+       也就是说 `parents[n]` 写错时，上面那条测试照样全绿 —— 这条才钉得住。
+    """
+    from robotkinematics.adapters.config_yaml import PROJECT_ROOT
+
+    assert (PROJECT_ROOT / "pyproject.toml").is_file(), PROJECT_ROOT
+    assert (PROJECT_ROOT / "configs" / "default.yaml").is_file(), PROJECT_ROOT

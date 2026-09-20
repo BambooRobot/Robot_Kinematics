@@ -1,4 +1,5 @@
 """@file planar2r.py
+
 @brief 平面二连杆的解析运动学 —— 本项目**唯一保留的手推公式**。
 
    base ──q1──> link1(L1) ──q2──> link2(L2) ──> tool
@@ -30,6 +31,7 @@ class Planar2R:
     l2: float = 1.0
 
     def __post_init__(self) -> None:
+        """连杆长度必须为正 —— 非正数会让 FK、IK、雅可比同时失去意义。"""
         if self.l1 <= 0.0 or self.l2 <= 0.0:
             raise ValueError(f"连杆长度必须为正，收到 l1={self.l1}, l2={self.l2}")
 

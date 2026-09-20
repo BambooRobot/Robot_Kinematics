@@ -1,4 +1,5 @@
 """@file __init__.py
+
 @brief robotkinematics：自研 SE3 与串联机器人运动学。
 
 分层：interfaces -> application -> infrastructure -> domain，依赖只允许向下。

@@ -1,4 +1,5 @@
 """@file render_json.py
+
 @brief 把同一份报告渲染成 JSON —— 用来证明"用例不认识终端"这件事是真的。
 
 重构前，用例直接拼中文字符串，想给别的程序调用就得把逻辑再写一遍；
@@ -32,10 +33,20 @@ class JsonRenderer:
     """JSON 渲染器。结构：{title, blocks:[...], fields:{...}}。"""
 
     def __init__(self, outputs_dir: str | Path | None = None, indent: int = 2) -> None:
+        """@brief 指定落盘目录与缩进。
+
+        @param outputs_dir 目录；None 表示只返回字符串、不写文件
+        @param indent JSON 缩进空格数
+        """
         self.outputs_dir = Path(outputs_dir) if outputs_dir is not None else None
         self.indent = indent
 
     def render(self, report: Report) -> str:
+        """@brief 把报告渲染成 JSON 字符串。
+
+        @param report 用例产出的报告
+        @return JSON 文本；若构造时给了 outputs_dir 且报告带 output_name，同时落盘
+        """
         payload = {
             "title": report.title,
             "blocks": [self._render_block(b) for b in report.blocks],

@@ -1,4 +1,5 @@
 """@file test_panda.py
+
 @brief Panda：库的 FK / IK / 雅可比**用法**对不对（数学是库的事，用法是我们的责任）。
 """
 
@@ -17,16 +18,19 @@ Q_SEED = np.array([0.0, -0.3, 0.0, -2.2, 0.0, 2.0, 0.8])
 
 @pytest.fixture
 def robot():
+    """被测对象：Panda 配 TCP 末端帧（夹爪尖），本文件统一用这一套，不与法兰帧混用。"""
     return robots.panda(robots.TCP)
 
 
 def test_fk_matches_course_numbers(robot):
+    """FK 数值与课件对得上 —— 库的调用姿势（q 顺序、末端帧）必须和课件完全一致。"""
     assert np.allclose(
         np.asarray(robots.end_pose(robot, Q_GOAL, robots.TCP).t), [0.4737, 0.0, 0.4606], atol=5e-5
     )
 
 
 def test_jacobian_shape_is_6_by_7(robot):
+    """6x7 是冗余机械臂的标志：行是位姿自由度，列是关节数，多出的一维就是零空间。"""
     assert np.asarray(robot.jacob0(Q_SEED)).shape == (6, 7)
 
 
@@ -81,6 +85,7 @@ def test_zero_pose_is_singular(robot):
 
 
 def test_ik_report_mentions_the_frame_and_verifies_with_fk(robot):
+    """IK 报告不能只信求解器的 success 标志，位姿误差必须用 FK 复算一遍再说「成了」。"""
     target = robots.end_pose(robot, Q_GOAL, robots.TCP)
     report = panda_uc.ik_report(robot, target, Q_SEED, show_redundancy=False)
     assert report.fields["success"] is True

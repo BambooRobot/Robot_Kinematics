@@ -1,4 +1,5 @@
 """@file cases.py
+
 @brief 读取 data/cases/*.csv：课件里的算例数据集。
 
 三张表的列名与课件保持一致（不改列名，才能和课件输出逐条对照）：
@@ -45,6 +46,7 @@ class TwoLinkCase:
 
     @property
     def kind(self) -> str:
+        """这条算例是 FK（填了关节角）还是 IK（填了目标点）。"""
         return "fk" if self.q_deg is not None else "ik"
 
 
@@ -58,6 +60,12 @@ class PandaCase:
 
 
 def load_coordinate_cases(directory: str | Path) -> list[CoordinateCase]:
+    """@brief 读 coordinate_cases.csv：相机→本体变换的算例。
+
+    @param directory 算例目录（通常是 configs 里的 paths.cases_dir）
+    @return 算例列表，顺序与 CSV 行序一致
+    @throws KinematicsError 文件不存在、或某个数值列不是数字
+    """
     rows = _read_rows(Path(directory) / "coordinate_cases.csv")
     return [
         CoordinateCase(
@@ -72,6 +80,14 @@ def load_coordinate_cases(directory: str | Path) -> list[CoordinateCase]:
 
 
 def load_two_link_cases(directory: str | Path) -> list[TwoLinkCase]:
+    """@brief 读 two_link_cases.csv：二连杆 FK / IK / 奇异点算例。
+
+    ⚠️ 同一张表里混着两类算例，靠"填了 q 还是填了 target"分流（见 TwoLinkCase.kind）。
+
+    @param directory 算例目录
+    @return 算例列表
+    @throws KinematicsError 文件不存在、数值列不是数字、或既没 q 也没 target
+    """
     rows = _read_rows(Path(directory) / "two_link_cases.csv")
     cases = []
     for row in rows:
@@ -95,6 +111,14 @@ def load_two_link_cases(directory: str | Path) -> list[TwoLinkCase]:
 
 
 def load_panda_cases(directory: str | Path) -> list[PandaCase]:
+    """@brief 读 panda_cases.csv：Panda 的三个演示姿态。
+
+    （课件里这个文件声明了却没有任何脚本读它 —— 本项目把它接进了批量报告。）
+
+    @param directory 算例目录
+    @return 算例列表，每个含 7 个关节角
+    @throws KinematicsError 文件不存在或关节角列缺失
+    """
     rows = _read_rows(Path(directory) / "panda_cases.csv")
     cases = []
     for row in rows:
@@ -156,13 +180,20 @@ class CsvCaseSource:
     """
 
     def __init__(self, directory: str | Path) -> None:
+        """@brief 指定算例目录。
+
+        @param directory 存放三个 CSV 的目录
+        """
         self.directory = Path(directory)
 
     def coordinate_cases(self) -> list[CoordinateCase]:
+        """@brief 见 load_coordinate_cases。"""
         return load_coordinate_cases(self.directory)
 
     def two_link_cases(self) -> list[TwoLinkCase]:
+        """@brief 见 load_two_link_cases。"""
         return load_two_link_cases(self.directory)
 
     def panda_cases(self) -> list[PandaCase]:
+        """@brief 见 load_panda_cases。"""
         return load_panda_cases(self.directory)

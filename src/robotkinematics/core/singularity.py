@@ -1,4 +1,5 @@
 """@file singularity.py
+
 @brief 奇异位姿体检 —— 一层薄封装：SVD 用 numpy，可操作度用库的现成实现。
 
 【为什么还留着这一层】因为"读出结论"这件事库不包：
@@ -33,6 +34,7 @@ class SingularityReport:
     is_near_singular: bool
 
     def summary(self) -> str:
+        """把体检结论压成一行：四个关键数值 + 正常 / 接近奇异 / 奇异。"""
         state = "奇异" if self.is_singular else ("接近奇异" if self.is_near_singular else "正常")
         return (
             f"σ_max={self.sigma_max:.4e} σ_min={self.sigma_min:.4e} "

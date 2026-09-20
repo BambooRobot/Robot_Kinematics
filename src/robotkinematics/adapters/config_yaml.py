@@ -1,4 +1,5 @@
 """@file config.py
+
 @brief 运行时配置：读 YAML、校验取值范围、处理命令行覆盖。
 
 三条行为是刻意设计的（与同目录的 face_recognition_app 保持一致）：
@@ -38,12 +39,16 @@ def resolve_path(path: str | Path) -> Path:
 
 @dataclass
 class PlanarConfig:
+    """二连杆的几何参数。"""
+
     l1: float = 1.0
     l2: float = 1.0
 
 
 @dataclass
 class CameraConfig:
+    """相机在本体坐标系下的安装位姿。"""
+
     x: float = 0.30
     y: float = 0.00
     z: float = 0.60
@@ -52,6 +57,8 @@ class CameraConfig:
 
 @dataclass
 class IKConfig:
+    """数值 IK 的求解参数（传给库的 `ikine_LM`）。"""
+
     dls_lambda: float = 0.05
     max_iter: int = 200
     tol: float = 1.0e-9
@@ -60,6 +67,8 @@ class IKConfig:
 
 @dataclass
 class SingularityConfig:
+    """奇异位姿的判定阈值。"""
+
     det_eps: float = 1.0e-9
     cond_warn: float = 100.0
 
@@ -79,12 +88,16 @@ class PickConfig:
 
 @dataclass
 class PathsConfig:
+    """数据与产物的目录（相对路径会先按当前目录找，再回到项目根目录）。"""
+
     cases_dir: str = "data/cases"
     outputs_dir: str = "outputs"
 
 
 @dataclass
 class Config:
+    """整个项目的运行时配置，对应 configs/default.yaml 的各个段。"""
+
     planar: PlanarConfig = field(default_factory=PlanarConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
     ik: IKConfig = field(default_factory=IKConfig)
@@ -97,6 +110,12 @@ class Config:
 
     @classmethod
     def from_yaml(cls, path: str | Path | None = None) -> Config:
+        """@brief 读 YAML 建配置：未识别的配置项告警、数值做范围校验。
+
+        @param path 配置文件路径；None 表示用默认的 configs/default.yaml
+        @return 校验过的 Config 实例（`config.source` 记录实际读到的文件）
+        @throws KinematicsError 文件打不开、顶层不是映射、或数值越界
+        """
         resolved = resolve_path(path or DEFAULT_CONFIG_PATH)
         if not resolved.exists():
             raise KinematicsError(f"无法打开配置文件: {resolved}")
@@ -123,6 +142,10 @@ class Config:
         return config
 
     def validate(self) -> None:
+        """@brief 校验各配置项的取值区间 —— 把错误拦在启动阶段，而不是算到一半才崩。
+
+        @throws KinematicsError 任一项越界或不是数字
+        """
         _check_range("planar.l1", self.planar.l1, 1e-9, 1e6)
         _check_range("planar.l2", self.planar.l2, 1e-9, 1e6)
         _check_range("ik.dls_lambda", self.ik.dls_lambda, 1e-9, 1e3)
@@ -142,10 +165,12 @@ class Config:
 
     @property
     def cases_dir_path(self) -> Path:
+        """算例 CSV 所在目录（已解析成绝对路径）。"""
         return resolve_path(self.paths.cases_dir)
 
     @property
     def outputs_dir_path(self) -> Path:
+        """报告与图片的输出目录（已解析成绝对路径）。"""
         return resolve_path(self.paths.outputs_dir)
 
     # ── 命令行覆盖 ──────────────────────────────────────────────────────────

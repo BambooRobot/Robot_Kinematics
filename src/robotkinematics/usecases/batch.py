@@ -1,4 +1,5 @@
 """@file batch.py
+
 @brief 批量跑完算例集 —— 对应课件 11_ppt_cases_batch.py，并补上它的缺口。
 
 课件版本只读了 coordinate_cases.csv 和 two_link_cases.csv，把 panda_cases.csv 落在一边
@@ -23,6 +24,11 @@ OUTPUT_NAME = "ppt_cases_batch_result.txt"
 
 
 def run(source: CaseSource) -> Report:
+    """@brief 把三张算例表依次跑一遍，汇总成一份报告。
+
+    @param source 算例来源（三个 CSV 都在这里读，见 contracts.CaseSource）
+    @return 报告；其正文与课件的 outputs/ppt_cases_batch_result.txt 逐字符一致
+    """
     lines: list[str] = []
 
     lines.append("1) 坐标变换：camera frame -> base frame")

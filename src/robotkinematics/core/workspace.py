@@ -1,4 +1,5 @@
 """@file workspace.py
+
 @brief 可达性估计：沿某个方向"最远能到哪里" —— 库没有这个 API，靠采样。
 
 【为什么库给不了】robotics toolbox 的 `robot.reach` 实测对本项目的模型返回 0，
@@ -40,6 +41,7 @@ class ReachEstimate:
         return float(self.radius - distance)
 
     def summary(self) -> str:
+        """把估计值连同"怎么估出来的"一起写出来：采样数、种子、是否计限位。"""
         scope = "计关节限位" if self.within_limits else "未计关节限位"
         return (
             f"沿该方向可达 {self.radius:.4f} m"

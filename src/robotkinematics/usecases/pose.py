@@ -1,4 +1,5 @@
 """@file pose.py
+
 @brief 位姿在几种表示之间互转 —— 对应课件 01_se3_basic.py 与第一节的旋转表示。
 
 换成 spatialmath 之后，本节的重点从"怎么算"变成"**约定对不对**"：
@@ -33,6 +34,20 @@ def run(
     yaw_deg: float,
     point: tuple[float, float, float] = (0.1, 0.0, 0.0),
 ) -> Report:
+    """@brief 一个位姿的"全身照"：同一姿态用四种表示各写一遍，再互相重建校验。
+
+    对应课件 01_se3_basic.py。长度/角度都按人读的顺序给（角度传度数、内部转弧度），
+    并且每处都标出本项目采用的约定 —— 约定接错不会报错，只会静默给出另一个姿态。
+
+    @param x 平移 x [m]
+    @param y 平移 y [m]
+    @param z 平移 z [m]
+    @param roll_deg 绕 x 轴转角 [°]
+    @param pitch_deg 绕 y 轴转角 [°]
+    @param yaw_deg 绕 z 轴转角 [°]
+    @param point 用来演示点变换的测试点 [m]
+    @return 报告；fields 里带齐四套表示，供 --json 或测试取值
+    """
     roll, pitch, yaw = np.deg2rad([roll_deg, pitch_deg, yaw_deg])
     T = SE3(x, y, z) * SE3.RPY(roll, pitch, yaw, order=RPY_ORDER)
     target = np.asarray(point, dtype=float)

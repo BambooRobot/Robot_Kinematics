@@ -1,4 +1,5 @@
 """@file render_text.py
+
 @brief 把报告渲染成终端文本 —— 布局全在这里：分节线、表格列宽、对齐、缩进。
 
 【为什么要自己算显示宽度】中文字符在等宽终端里占 2 列，Python 的 f"{s:<14}" 只按字符个数
@@ -104,9 +105,19 @@ class TextRenderer:
     """终端文本渲染器。outputs_dir 为 None 时只打印、不落盘。"""
 
     def __init__(self, outputs_dir: str | Path | None = None) -> None:
+        """@brief 指定落盘目录。
+
+        @param outputs_dir 目录；None 表示只打印、不写文件
+        """
         self.outputs_dir = Path(outputs_dir) if outputs_dir is not None else None
 
     def render(self, report: Report) -> str:
+        """@brief 把报告渲染成终端文本。
+
+        @param report 用例产出的报告
+        @return 文本；若构造时给了 outputs_dir 且报告带 output_name，
+            同时把**正文**（不含分节线与"已保存"提示）落盘
+        """
         # 正文 = 所有块拼起来；分节线只是终端装饰，不进正文
         body = "\n".join(
             rendered for rendered in (self._render_block(b) for b in report.blocks) if rendered
@@ -132,7 +143,8 @@ class TextRenderer:
         if isinstance(block, TableBlock):
             return table(block.headers, block.rows, block.aligns)
         if isinstance(block, TwoLinkChartBlock):
-            chart = ascii_two_link_chart(block.points, block.size, block.limit)
+            # 网格与坐标范围用渲染器自己的默认值（画法不进契约层）
+            chart = ascii_two_link_chart(block.points)
             return f"{block.label}\n{chart}" if block.label else chart
         raise KinematicsError(f"未知的报告块类型: {type(block).__name__}")
 

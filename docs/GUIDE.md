@@ -115,21 +115,24 @@ robot_kinematics_app/
 ├── docs/                     本文、KNOWLEDGE_MAP、NUMBERS、架构图
 ├── scripts/                  run_all.sh、架构图脚本
 ├── src/robotkinematics/
-│   ├── core/                 ★ 库覆盖不到的那部分（约 200 行）
+│   ├── main.py               ★ 唯一入口 = 组合根：命令表 + 装配 + 异常出口
+│   │                           读它一个文件就知道"这个程序用到哪些实现"
+│   ├── core/                 ★ 库覆盖不到的那部分
 │   │   ├── robots.py           从库建模型：末端帧、关节限位、link 位置
 │   │   ├── planar2r.py         二连杆解析 FK/IK（库给不出两组解）
 │   │   ├── workspace.py        可达性采样（库没有这个 API）
 │   │   ├── singularity.py      SVD 体检 + 库的 manipulability
 │   │   └── exceptions.py       领域异常
 │   ├── contracts.py          契约：Report / 报告块 + 4 个协议
-│   ├── usecases/             用例层（pick 是主线）
+│   ├── usecases/             用例层（pick 是主线：pick + pick_types/steps/report）
 │   ├── adapters/             配置、算例、两种渲染、绘图
-│   └── cli/                  组合根 + 参数 + 入口
-└── tests/                    162 条断言，按层组织
+│   └── __main__.py           三行：`python -m robotkinematics` 的桥
+└── tests/                    170 条断言（含 test_architecture.py 的架构守卫）
 ```
 
-**依赖方向**：`cli → usecases → contracts / core`，`adapters` 实现 contracts 里的协议；
+**依赖方向**：`main.py → usecases → contracts / core`，`adapters` 实现 contracts 里的协议；
 **用例不直接依赖适配器**（这条边界让"算一遍"和"打印成表格"解耦，同一份结果能出文本也能出 JSON）。
+这三条不是靠自觉：`tests/test_architecture.py` 读源码的 import 与构造调用，违反了就红。
 
 ---
 
@@ -163,7 +166,7 @@ rkin pick --observe 0.2 0 0 --plot
 
 1. `core/robots.py` —— 看末端帧、限位、link 位置是怎么从库里取的
 2. `contracts.py` —— `Report` 与几种报告块；这是"用例产出什么"的定义
-3. `cli/commands.py` —— 每个子命令一个函数，看它怎么把模型和用例接起来
+3. `main.py` —— 命令表在文件开头、处理函数在末尾；看它怎么把模型和用例接起来
 
 **读完能回答**：`rkin pick` 到底用了库的哪几个 API？
 
@@ -392,4 +395,4 @@ rkin panda-fk | panda-ik | panda-jac | panda-sing
 rkin pick --observe X Y Z [--arm planar]     # 抓取流水线
 ```
 
-**分层依赖**：`cli → usecases → contracts/core`；**用例不许直接依赖 adapters**。
+**分层依赖**：`main.py → usecases → contracts/core`；**用例不许直接依赖 adapters** —— 这三条由 `tests/test_architecture.py` 守着。

@@ -1,4 +1,5 @@
 """@file contracts.py
+
 @brief 用例与适配器之间的契约：结果对象（用例产出什么）+ 协议（用例需要什么）。
 
 【为什么要有这一层】重构前，用例直接依赖"打印成中文表格"的具体实现，
@@ -48,6 +49,11 @@ class TextBlock:
 
     @staticmethod
     def of(*lines: str) -> TextBlock:
+        """@brief 用一列字符串直接造一个文本块（比写 tuple 顺手）。
+
+        @param lines 文本行，每行一句
+        @return 包装好的 TextBlock
+        """
         return TextBlock(tuple(lines))
 
 
@@ -91,12 +97,14 @@ class TwoLinkChartBlock:
     """二连杆姿态图（内容，不是画法）：只给出 base/elbow/tool 三个点。
 
     终端渲染器把它画成字符画，将来换成图形渲染器就能画成真图 —— 用例不用改。
+
+    ⚠️ "网格多少格、坐标范围取多大"是**画法**，所以它在渲染器里
+       （`adapters.render_text.ascii_two_link_chart` 的默认参数），不在契约里 ——
+       这一条是这层的分界线：换个渲染器还要不要重写？要重写的就不属于契约。
     """
 
     points: tuple[np.ndarray, np.ndarray, np.ndarray]
     label: str = ""
-    size: int = 25
-    limit: float = 2.1
 
 
 Block = HeadingBlock | TextBlock | VectorBlock | MatrixBlock | TableBlock | TwoLinkChartBlock
@@ -120,57 +128,83 @@ class Report:
 class Renderer(Protocol):
     """把报告渲染成字符串（终端文本 / JSON 都由适配器实现）。"""
 
-    def render(self, report: Report) -> str: ...
+    def render(self, report: Report) -> str:
+        """@brief 把一份报告渲染成字符串。
+
+        @param report 用例产出的报告
+        @return 渲染结果（终端文本或 JSON 字符串）
+        """
+        ...
 
 
 @runtime_checkable
 class CaseSource(Protocol):
     """算例来源。用例不知道它是 CSV、数据库还是内存里造出来的。"""
 
-    def coordinate_cases(self) -> list: ...
+    def coordinate_cases(self) -> list:
+        """@brief 取相机→本体变换的算例。
 
-    def two_link_cases(self) -> list: ...
+        @return CoordinateCase 列表（相机安装位姿 + 杯子在相机下的位置）
+        """
+        ...
 
-    def panda_cases(self) -> list: ...
+    def two_link_cases(self) -> list:
+        """@brief 取二连杆算例。
+
+        @return TwoLinkCase 列表（填了 q 的是 FK 算例，填了 target 的是 IK 算例）
+        """
+        ...
+
+    def panda_cases(self) -> list:
+        """@brief 取 Panda 演示姿态。
+
+        @return PandaCase 列表（每个含 7 个关节角）
+        """
+        ...
 
 
 @runtime_checkable
 class Plotter(Protocol):
     """出图。用例只关心"图存到哪了"，不关心 matplotlib。"""
 
-    def plot_two_link(self, arm, q1_deg: float, q2_deg: float, target=None) -> Path: ...
+    def plot_two_link(self, arm, q1_deg: float, q2_deg: float, target=None) -> Path:
+        """@brief 画二连杆的 2D 姿态图（含可达圆环）。
 
-    def plot_panda_skeleton(self, robot, q: np.ndarray) -> Path: ...
+        @param arm Planar2R 模型
+        @param q1_deg 第一关节角 [度]
+        @param q2_deg 第二关节角 [度]
+        @param target 可选的目标点 (x, y)，给了就在图上标出来
+        @return 图片文件路径
+        """
+        ...
 
-    def animate_two_link(
-        self, arm, sweep: str, frames: int, q1_deg: float, q2_deg: float
-    ) -> Path: ...
+    def plot_panda_skeleton(self, robot, q: np.ndarray) -> Path:
+        """@brief 画 Panda 的骨架图（3D 不可用时自动回退三视图）。
 
-    def plot_pick_result(self, task, result, robot) -> Path: ...
+        @param robot Panda 模型实例
+        @param q 7 个关节角 [rad]
+        @return 图片文件路径
+        """
+        ...
 
+    def animate_two_link(self, arm, sweep: str, frames: int, q1_deg: float, q2_deg: float) -> Path:
+        """@brief 生成二连杆单关节扫动的 GIF。
 
-@dataclass(frozen=True)
-class ReferenceNumbers:
-    """第三方运动学库取来的一组参照数（由适配器填充，可能为空）。"""
+        @param arm Planar2R 模型
+        @param sweep 扫哪个关节："q1" 或 "q2"
+        @param frames 帧数
+        @param q1_deg 扫 q2 时保持不变的第一关节角 [度]
+        @param q2_deg 扫 q1 时保持不变的 第二关节角 [度]
+        @return GIF 文件路径
+        """
+        ...
 
-    available: bool
-    reason: str = ""
-    versions: tuple[tuple[str, str], ...] = ()
-    se3_chain_t: np.ndarray | None = None
-    se3_inverse_t: np.ndarray | None = None
-    planar_fk: np.ndarray | None = None
-    panda_flange_t: tuple[np.ndarray, ...] = ()
-    panda_tcp_t: tuple[np.ndarray, ...] = ()
-    panda_jacobian_flange: np.ndarray | None = None
-    panda_jacobian_tcp: np.ndarray | None = None
-    ik_success: bool | None = None
-    ik_q: np.ndarray | None = None
-    fk_of_ik_q: np.ndarray | None = None
-    call_errors: tuple[tuple[str, str], ...] = ()  # (对照项, 出错原因)
+    def plot_pick_result(self, task, result, robot) -> Path:
+        """@brief 画抓取任务图（可达边界 / 机械臂姿态 / 末端路径 / 奇异点标记）。
 
-
-@runtime_checkable
-class KinematicsReference(Protocol):
-    """第三方参照库。适配器负责取数，用例负责判定 —— 判定逻辑不该在适配器里。"""
-
-    def probe(self) -> ReferenceNumbers: ...
+        @param task 抓取任务（提供末端帧与机型）
+        @param result 流水线跑出来的结果（提供关节解与结论）
+        @param robot 机器人模型实例
+        @return 图片文件路径
+        """
+        ...

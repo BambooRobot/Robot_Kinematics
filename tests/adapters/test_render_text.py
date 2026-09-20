@@ -1,4 +1,5 @@
 """@file test_render_text.py
+
 @brief 终端渲染：中文宽度对齐、表格、块渲染、落盘 —— 布局的测试都集中在这里。
 """
 
@@ -29,33 +30,39 @@ from robotkinematics.core.exceptions import KinematicsError
 
 
 def test_display_width_counts_cjk_as_two_columns():
+    """中文字符在等宽终端里按 2 列算 —— 表格竖线才能对齐。"""
     assert display_width("abc") == 3
     assert display_width("普通姿态") == 8
     assert display_width("q1=90°") == 6  # ° 是全角
 
 
 def test_pad_aligns_by_display_width_not_character_count():
+    """补齐按显示宽度算，不能按字符个数，否则中文列会歪。"""
     assert display_width(pad("普通", 8)) == 8
     assert display_width(pad("ab", 8)) == 8
     assert pad("ab", 5, ">") == "   ab"
 
 
 def test_table_columns_line_up():
+    """中文与角度符号混排时每行显示宽度仍相等，否则终端里竖不齐。"""
     text = table(["姿态", "q2"], [["普通姿态", "90°"], ["接近奇异", "10°"]])
     widths = {display_width(line) for line in text.splitlines()}
     assert len(widths) == 1, "每一行的显示宽度必须一致，否则终端里竖不齐"
 
 
 def test_table_handles_empty_rows():
+    """没有数据行时返回空串，不能只画出半张表头。"""
     assert table(["a", "b"], []) == ""
 
 
 def test_table_rejects_mismatched_alignments():
+    """对齐符号个数与列数不符要报错，避免整张表错位。"""
     with pytest.raises(KinematicsError):
         table(["a", "b"], [["1", "2"]], aligns=["<"])
 
 
 def test_format_matrix_aligns_columns():
+    """矩阵各行的显示宽度要一致，负号和多位数字都不能把列撑歪。"""
     text = format_matrix(np.array([[1.0, -20.0], [333.0, 4.0]]), digits=2)
     lines = text.splitlines()
     assert len(lines) == 2
@@ -63,11 +70,13 @@ def test_format_matrix_aligns_columns():
 
 
 def test_format_matrix_rejects_non_matrix():
+    """传一维数组要报错，矩阵格式化只接受二维输入。"""
     with pytest.raises(KinematicsError):
         format_matrix(np.zeros(3))
 
 
 def test_ascii_chart_marks_base_elbow_tool():
+    """ASCII 图里 B/E/T 三个关节标记和连杆星号都得画出来。"""
     from robotkinematics.core.planar2r import Planar2R
 
     drawing = ascii_two_link_chart(Planar2R().joint_points(0.0, np.pi / 2))
@@ -77,6 +86,7 @@ def test_ascii_chart_marks_base_elbow_tool():
 
 
 def test_renderer_renders_every_block_kind():
+    """五种块类型都要渲染出内容，新增块类型时别漏了渲染分支。"""
     report = Report(
         title="标题",
         blocks=(
@@ -93,6 +103,7 @@ def test_renderer_renders_every_block_kind():
 
 
 def test_renderer_draws_the_chart_block():
+    """图表块也要走渲染流程，末端标记 T 要出现在正文里。"""
     from robotkinematics.core.planar2r import Planar2R
 
     report = Report(
@@ -114,12 +125,15 @@ def test_renderer_writes_only_the_body_to_file(tmp_path):
 
 
 def test_renderer_without_outputs_dir_does_not_write(tmp_path):
+    """没给输出目录时只渲染不落盘，不能偷偷写到别处。"""
     report = Report(title="标题", blocks=(TextBlock.of("x"),), output_name="out.txt")
     TextRenderer(outputs_dir=None).render(report)
     assert not (tmp_path / "out.txt").exists()
 
 
 def test_renderer_rejects_unknown_block():
+    """未知块类型要显式报错，不能静默跳过导致正文缺内容。"""
+
     class Weird:
         pass
 
@@ -128,11 +142,13 @@ def test_renderer_rejects_unknown_block():
 
 
 def test_write_output_creates_directory(tmp_path):
+    """输出目录不存在时自动创建，文件末尾补一个换行。"""
     path = write_output("report.txt", "内容", tmp_path / "nested" / "outputs")
     assert path.exists()
     assert path.read_text(encoding="utf-8") == "内容\n"
 
 
 def test_renderer_reports_saved_path(tmp_path):
+    """渲染结果里要回显落盘路径，否则用户不知道文件写哪了。"""
     report = Report(title="t", blocks=(TextBlock.of("x"),), output_name="r.txt")
     assert "r.txt" in TextRenderer(outputs_dir=tmp_path).render(report)

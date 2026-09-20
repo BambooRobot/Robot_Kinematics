@@ -1,4 +1,5 @@
 """@file env_check.py
+
 @brief 环境自检 —— 对应课件 00_check_env.py，但检查的是本项目自己需要的东西。
 
 课件的自检在确认 spatialmath / roboticstoolbox 装没装；本项目把那两个库变成了
@@ -41,6 +42,13 @@ KINEMATICS_MODULES = [
 
 
 def run() -> Report:
+    """@brief 逐项体检当前环境，把结论写成一份可读的自检报告。
+
+    检查顺序是"越靠前越致命"：Python 版本 → numpy → 本项目自己的模块 → 运动学库。
+    前两项不合格后面的命令都跑不起来，所以它们排在前面报出来。
+
+    @return 报告；fields["ok"] 汇总是否全部通过，broken_modules 列出导入失败的模块
+    """
     lines = [
         f"Python: {sys.version.split()[0]} ({platform.platform()})",
         "说明：运动学（FK / IK / 雅可比 / 限位）由 spatialmath + roboticstoolbox 提供；",

@@ -1,4 +1,5 @@
 """@file robots.py
+
 @brief 机器人模型的构造与查询 —— 底层是 robotics toolbox，这里只做"配成我们需要的形态"。
 
 【本层剩下的领域逻辑并不多，但都是库不提供的】
@@ -24,7 +25,15 @@ PANDA_FLANGE_LINK = "panda_link8"
 
 
 def panda(frame: str = FLANGE) -> rtb.ERobot:
-    """Franka Panda 模型。frame 决定末端取法兰还是夹爪 TCP。"""
+    """@brief 建一个 Franka Panda 模型，末端按 frame 取法兰或夹爪 TCP。
+
+    ⚠️ 库的 `Panda()` 自带夹爪，所以"末端到底是哪个坐标系"在建模型时就要定下来。
+       两种末端差 103.4mm —— 详见 docs/GUIDE.md 第 7.3 节。
+
+    @param frame 末端帧：FLANGE（法兰 panda_link8）或 TCP（夹爪）
+    @return robotics toolbox 的 ERobot 实例（名字里会标出用的是哪个末端）
+    @throws ValueError frame 既不是 FLANGE 也不是 TCP
+    """
     if frame not in (FLANGE, TCP):
         raise ValueError(f"未知的末端帧 {frame!r}（可选 {FLANGE} / {TCP}）")
     robot = rtb.models.Panda()
@@ -33,15 +42,24 @@ def panda(frame: str = FLANGE) -> rtb.ERobot:
 
 
 def panda_end(frame: str = FLANGE) -> str | None:
-    """把我们的末端帧名字翻译成库的 `end=` 参数（None = 库默认的夹爪）。"""
+    """@brief 把本项目的末端帧名字翻译成库 `fkine(end=…)` 要的参数。
+
+    @param frame 末端帧：FLANGE 或 TCP
+    @return 法兰返回 "panda_link8"；夹爪返回 None（库的默认末端就是夹爪）
+    """
     return PANDA_FLANGE_LINK if frame == FLANGE else None
 
 
 def planar(l1: float = 1.0, l2: float = 1.0) -> rtb.DHRobot:
-    """平面二连杆。
+    """@brief 建一个平面二连杆模型。
 
-    ⚠️ 不用 `rtb.models.DH.Planar2()`：它的杆长 `a` 是只读属性，改不了。
-       要自定义杆长只能自建 DHRobot（这也是库的推荐做法）。
+    ⚠️ 不用 `rtb.models.DH.Planar2()`：它的杆长 `a` 是只读属性，改不了 ——
+       要自定义杆长只能自建 DHRobot（详见 docs/GUIDE.md 第 7.7 节）。
+
+    @param l1 第一节（底座到肘）长度 [m]，必须为正
+    @param l2 第二节（肘到末端）长度 [m]，必须为正
+    @return 两关节的 DHRobot，末端就在第二节末端
+    @throws ValueError 任一杆长非正
     """
     if l1 <= 0 or l2 <= 0:
         raise ValueError(f"连杆长度必须为正，收到 l1={l1}, l2={l2}")
@@ -52,21 +70,31 @@ def planar(l1: float = 1.0, l2: float = 1.0) -> rtb.DHRobot:
 
 
 def end_pose(robot: rtb.Robot, q: np.ndarray, frame: str = FLANGE) -> SE3:
-    """末端位姿。Panda 需要按 frame 指定 end；其他模型忽略 frame。"""
+    """@brief 算末端位姿（位置 + 姿态）。
+
+    @param robot robots toolbox 的模型实例
+    @param q 关节角 [rad]，一维数组，长度等于关节数
+    @param frame 末端帧；只对 Panda 有意义，其他模型（如二连杆）忽略
+    @return 4×4 位姿对象（spatialmath.SE3）
+    """
     q = np.asarray(q, dtype=float).reshape(-1)
     end = panda_end(frame) if _is_panda(robot) else None
     return robot.fkine(q, end=end) if end is not None else robot.fkine(q)
 
 
 def end_positions(robot: rtb.Robot, qs: np.ndarray, frame: str = FLANGE) -> np.ndarray:
-    """批量末端位置 (N, 3)。
+    """@brief 批量算末端位置，一次算 N 个姿态。
 
-    库的 `fkine` 原生支持 (N, n) 的批量输入，内部向量化 —— 比逐个调用快两个数量级，
+    库的 `fkine` 原生支持 (N, n) 的批量输入、内部向量化 —— 比逐个调用快两个数量级，
     所以工作空间采样（几千个姿态）是瞬间完成的。
 
-    ⚠️ 判别单/批量**不能**用 isinstance(SE3)：批量返回的也是 SE3（值数组），
-       而且它的 `.shape` 还报 (4,4)（骗人的）。可靠的办法是看 `.t` 的维数：
-       单个 → (3,)，批量 → (N, 3)。
+    ⚠️ 判别单/批量**不能**用 `isinstance(poses, SE3)`：批量返回的也是 SE3（值数组），
+       而且它的 `.shape` 还报 (4,4)（骗人的）。只能看 `.t` 的维数：单个 (3,)，批量 (N,3)。
+
+    @param robot robots toolbox 的模型实例
+    @param qs 关节角，形状 (N, n)；传单个 (n,) 也可以
+    @param frame 末端帧；只对 Panda 有意义
+    @return 位置矩阵，形状 (N, 3)；传单个姿态时返回 (1, 3)
     """
     qs = np.asarray(qs, dtype=float)
     end = panda_end(frame) if _is_panda(robot) else None
@@ -78,7 +106,14 @@ def end_positions(robot: rtb.Robot, qs: np.ndarray, frame: str = FLANGE) -> np.n
 
 
 def joint_limits(robot: rtb.Robot) -> np.ndarray | None:
-    """关节限位 (n, 2)；模型没定义限位时返回 None（如实告知，不编一组）。"""
+    """@brief 取关节限位。
+
+    模型没定义限位、或限位里含 inf 时返回 None —— 如实告知"不知道"，
+    而不是编一组数出来（调用方据此跳过限位校验）。
+
+    @param robot robots toolbox 的模型实例
+    @return 形状 (n, 2) 的数组（每行是 [下限, 上限]），或 None
+    """
     qlim = getattr(robot, "qlim", None)
     if qlim is None:
         return None
@@ -87,7 +122,12 @@ def joint_limits(robot: rtb.Robot) -> np.ndarray | None:
 
 
 def link_points(robot: rtb.Robot, q: np.ndarray) -> np.ndarray:
-    """每个 link 坐标系原点 + 末端，共 (n+2, 3) 个点 —— 画骨架用。"""
+    """@brief 取每个 link 坐标系的原点，供画机械臂骨架用。
+
+    @param robot robots toolbox 的模型实例
+    @param q 关节角 [rad]，长度等于关节数
+    @return 位置数组，形状 (n+2, 3)：第一行是 base 原点，中间是各关节，最后一行是末端
+    """
     q = np.asarray(q, dtype=float).reshape(-1)
     poses = robot.fkine_all(q)[:-1]  # 最后一个重复了末端，去掉
     points = [np.zeros(3)] + [np.asarray(T.t, dtype=float) for T in poses]
@@ -96,11 +136,23 @@ def link_points(robot: rtb.Robot, q: np.ndarray) -> np.ndarray:
 
 
 def joint_names(robot: rtb.Robot) -> list[str]:
+    """@brief 取各关节的名字（库里的名字，如 panda_joint1）。
+
+    @param robot robots toolbox 的模型实例
+    @return 关节名列表，长度等于关节数
+    """
     return [link.name for link in robot.links if link.isjoint]
 
 
 def limit_margin(q: np.ndarray, limits: np.ndarray | None) -> float:
-    """离最近的关节限位还有多少 [rad]；越界为负；无限位信息时返回 inf。"""
+    """@brief 算"离最近的关节限位还有多少"。
+
+    择优时用它挑"离限位远"的解 —— 贴限位的解在真机上很危险。
+
+    @param q 关节角 [rad]
+    @param limits 形状 (n, 2) 的限位数组；None 表示没有限位信息
+    @return 最小余量 [rad]：越界为负；limits 为 None 时返回 inf（当作不受限）
+    """
     if limits is None:
         return float("inf")
     q = np.asarray(q, dtype=float).reshape(-1)
@@ -109,7 +161,15 @@ def limit_margin(q: np.ndarray, limits: np.ndarray | None) -> float:
 
 
 def out_of_limits(q: np.ndarray, limits: np.ndarray | None, tol: float = 1e-9) -> list[int]:
-    """越界的关节下标（用于提示；数学上库对任何 q 都算得出 FK）。"""
+    """@brief 找出越界的关节下标。
+
+    只用于提示 —— 数学上库对任何 q 都算得出 FK，越界只是"真机摆不出来"。
+
+    @param q 关节角 [rad]
+    @param limits 形状 (n, 2) 的限位数组；None 表示没有限位信息（返回空列表）
+    @param tol 判定容差 [rad]，避免浮点噪声把贴边的解判成越界
+    @return 越界关节的下标列表，按从小到大排列
+    """
     if limits is None:
         return []
     q = np.asarray(q, dtype=float).reshape(-1)
@@ -122,6 +182,7 @@ def out_of_limits(q: np.ndarray, limits: np.ndarray | None, tol: float = 1e-9) -
 
 
 def _is_panda(robot: rtb.Robot) -> bool:
+    """判断是不是 Panda 模型（名字里带 panda，或 link 名字以 panda_link 开头）。"""
     return "panda" in (robot.name or "").lower() or any(
         link.name.startswith("panda_link") for link in robot.links
     )

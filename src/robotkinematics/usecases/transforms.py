@@ -1,4 +1,5 @@
 """@file transforms.py
+
 @brief 相机目标 → 机器人本体 —— 对应课件 02_transform_chain_camera_to_base.py 与练习 1。
 
 核心一句话：同一个杯子，换个 frame 表达，数值就变了；杯子一动没动。
@@ -28,6 +29,12 @@ def build_chain(case) -> tuple[SE3, SE3, SE3]:
 
 
 def case_report(case) -> Report:
+    """@brief 一条算例的变换链报告：三个矩阵 + 杯子在本体下的位置。
+
+    @param case 变换算例（见 adapters.cases_csv.CoordinateCase）
+    @return 报告；三个矩阵都按"相机相对本体 / 杯子相对相机 / 相乘结果"依次摆出，
+        最后补一句相乘顺序为什么不能反
+    """
     T_base_camera, T_camera_cup, T_base_cup = build_chain(case)
     return Report(
         title=f"坐标变换链：{case.case_id}",

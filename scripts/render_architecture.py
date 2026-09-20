@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """@file render_architecture.py
+
 @brief 生成架构图（SVG + PNG）—— 三块：分层结构 / 抓取流水线 / 关键配置。
 
 【为什么不用 graphviz 自动布局】自动布局会把**每一行 import 都画成一条边**，
@@ -50,13 +51,14 @@ MUTED = "#475569"
 
 LAYERS = [
     (
-        "接口层 · cli",
-        "组合根：造适配器 → 调用例 → 交给渲染器；唯一把错误呈现给用户的地方",
+        "入口 · main.py",
+        "唯一入口 = 组合根：命令表一览 + 全部装配 + 渲染 + 唯一的异常出口",
         "cli",
         [
-            "parser.py —— 参数定义（只有开关，没有业务）",
-            "commands.py —— 装配 + 派发（组合根）",
-            "main.py —— 渲染 + 唯一的异常出口",
+            "① 命令表 —— 命令 → 处理函数（一眼看全部能力）",
+            "② 装配 —— 全工程唯一一处“选实现”",
+            "③ 入口流程 + 异常出口",
+            "④ 处理函数 —— 一条命令一个",
         ],
     ),
     (
@@ -129,7 +131,7 @@ CONFIG_CARDS = [
 KEY_NUMBERS = (
     "可达边界是采样估计（固定 seed，可复现）：全方向最大 1.19 m，但沿斜下方只有 1.09 m —— 工作空间不是球  ｜  "
     "评分权重 0.5 / 0.3 / 0.2 写在 pick.SCORE_WEIGHTS 里，可审计  ｜  "
-    "162 条断言 · 自研的两处（闭式解 / 可达采样）均与库逐位对照"
+    "170 条断言 · 自研的两处（闭式解 / 可达采样）均与库逐位对照"
 )
 
 
@@ -137,6 +139,7 @@ KEY_NUMBERS = (
 
 
 def box(ax, x, y, w, h, text, *, fill, fontsize=9, bold=False, align="left", pad=0.2):
+    """画一个圆角卡片：文字默认左对齐、垂直居中。"""
     ax.add_patch(
         FancyBboxPatch(
             (x, y),
@@ -164,6 +167,7 @@ def box(ax, x, y, w, h, text, *, fill, fontsize=9, bold=False, align="left", pad
 
 
 def label(ax, x, y, text, *, fontsize=9, color=MUTED, ha="left", bold=False):
+    """写一段不画框的说明文字（小标题、图例、注释都用它）。"""
     ax.text(
         x,
         y,
@@ -178,6 +182,7 @@ def label(ax, x, y, text, *, fontsize=9, color=MUTED, ha="left", bold=False):
 
 
 def arrow(ax, x1, y1, x2, y2, *, color=EDGE, style="-|>", lw=1.4, linestyle="-"):
+    """画一根箭头：层间依赖、工序之间的数据流都用它。"""
     ax.add_patch(
         FancyArrowPatch(
             (x1, y1),
@@ -447,6 +452,7 @@ def draw_config(ax) -> None:
 
 
 def main() -> int:
+    """画出三块内容并存成 SVG + PNG，返回进程退出码。"""
     configure_chinese_font()
     figure, ax = plt.subplots(figsize=(16.2, 11.6))
     figure.patch.set_facecolor("white")
@@ -467,7 +473,7 @@ def main() -> int:
     ax.text(
         98,
         98.6,
-        "Python 3.10 · spatialmath + roboticstoolbox · 162 条断言",
+        "Python 3.10 · spatialmath + roboticstoolbox · 170 条断言",
         fontsize=9,
         color=MUTED,
         ha="right",

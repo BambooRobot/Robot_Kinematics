@@ -1,4 +1,5 @@
 """@file plotting.py
+
 @brief 出图：二连杆 2D 姿态、Panda 3D 骨架、关节扫动 GIF。
 
 【为什么用 Agg 后端】这个项目经常在没有显示器的环境里跑（SSH、容器）。
@@ -333,18 +334,26 @@ class MatplotlibPlotter:
     """
 
     def __init__(self, outputs_dir: str | Path = "outputs") -> None:
+        """@brief 指定图片存放目录。
+
+        @param outputs_dir 目录不存在时会自动创建
+        """
         self.outputs_dir = outputs_dir
 
     def plot_two_link(self, arm, q1_deg: float, q2_deg: float, target=None) -> Path:
+        """@brief 见模块级 plot_two_link。"""
         return plot_two_link(arm, q1_deg, q2_deg, self.outputs_dir, target=target)
 
     def plot_panda_skeleton(self, robot, q) -> Path:
+        """@brief 见模块级 plot_panda_skeleton。"""
         return plot_panda_skeleton(robot, q, self.outputs_dir)
 
     def plot_pick_result(self, task, result, robot) -> Path:
+        """@brief 见模块级 plot_pick_result。"""
         return plot_pick_result(task, result, robot, self.outputs_dir)
 
     def animate_two_link(self, arm, sweep: str, frames: int, q1_deg: float, q2_deg: float) -> Path:
+        """@brief 见模块级 animate_two_link。"""
         return animate_two_link(
             arm,
             sweep=sweep,
