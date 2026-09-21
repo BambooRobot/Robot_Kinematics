@@ -1,6 +1,6 @@
 """@file test_panda.py
 
-@brief Panda：库的 FK / IK / 雅可比**用法**对不对（数学是库的事，用法是我们的责任）。
+@brief Panda：库的 FK / IK / 雅可比用法对不对（数学是库的事，用法是我们的责任）。
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import pytest
 
 from robotkinematics.core import robots
 from robotkinematics.core.singularity import analysis_of, analyze, manipulability
-from robotkinematics.usecases import panda as panda_uc
 
 Q_GOAL = np.array([0.0, -0.4, 0.0, -2.2, 0.0, 2.0, 0.7853981634])
 Q_SEED = np.array([0.0, -0.3, 0.0, -2.2, 0.0, 2.0, 0.8])
@@ -18,19 +17,19 @@ Q_SEED = np.array([0.0, -0.3, 0.0, -2.2, 0.0, 2.0, 0.8])
 
 @pytest.fixture
 def robot():
-    """被测对象：Panda 配 TCP 末端帧（夹爪尖），本文件统一用这一套，不与法兰帧混用。"""
+    """被测对象：Panda 配 TCP 末端帧（夹爪尖）。"""
     return robots.panda(robots.TCP)
 
 
 def test_fk_matches_course_numbers(robot):
-    """FK 数值与课件对得上 —— 库的调用姿势（q 顺序、末端帧）必须和课件完全一致。"""
+    """FK 数值与课件对得上。"""
     assert np.allclose(
         np.asarray(robots.end_pose(robot, Q_GOAL, robots.TCP).t), [0.4737, 0.0, 0.4606], atol=5e-5
     )
 
 
 def test_jacobian_shape_is_6_by_7(robot):
-    """6x7 是冗余机械臂的标志：行是位姿自由度，列是关节数，多出的一维就是零空间。"""
+    """6x7 是冗余机械臂的标志。"""
     assert np.asarray(robot.jacob0(Q_SEED)).shape == (6, 7)
 
 
@@ -42,12 +41,11 @@ def test_jacobian_last_column_is_pure_rotation(robot):
 
 
 def test_ik_round_trip_recovers_the_target(robot):
-    """先用 FK 造一个一定可达的目标，再让 IK 找回来（课件 09 的思路）。"""
+    """先用 FK 造一个一定可达的目标，再让 IK 找回来。"""
     target = robots.end_pose(robot, Q_GOAL, robots.TCP)
     solution = robot.ikine_LM(target, q0=Q_SEED, tol=1e-9)
     assert solution.success
     reached = np.asarray(robots.end_pose(robot, np.asarray(solution.q), robots.TCP).t)
-    # 库的 tol 是关节步长判据，换算到位姿残差是 1e-7 量级（实测 5.2e-7）
     assert np.linalg.norm(reached - np.asarray(target.t)) < 1e-5
 
 
@@ -62,42 +60,28 @@ def test_redundant_robot_reaches_the_same_pose_from_different_seeds(robot):
             solved.append(np.asarray(solution.q))
     assert len(solved) >= 2
     for q in solved:
-        # ⚠️ 容差按实测取 1e-4：库的 tol 是**关节步长**判据，不直接约束位姿精度，
-        #    不同初值收敛到的位姿残差在 1e-7 ~ 1e-5 之间浮动。
         assert np.allclose(
             np.asarray(robots.end_pose(robot, q, robots.TCP).t), np.asarray(target.t), atol=1e-4
         )
-    # 差值不大（0.07 rad 量级）—— 7 自由度只有一个零空间方向，沿它的位移本来就有界，
-    # 这与本项目"次要任务收益很小"的实测结论一致（见 docs/GUIDE.md 第 7 章）
     assert np.linalg.norm(solved[0] - solved[1]) > 0.01
 
 
 def test_analysis_and_library_manipulability_agree(robot):
-    """我们算的可操作度（numpy SVD）与库的 manipulability 必须一致。"""
+    """我们算的可操作度与库的 manipulability 必须一致。"""
     assert np.isclose(analysis_of(robot, Q_SEED).manipulability, manipulability(robot, Q_SEED))
 
 
 def test_zero_pose_is_singular(robot):
-    """课件姿态 1（全零）是奇异位形：手臂竖直、腕部对齐。"""
+    """全零是奇异位形：手臂竖直、腕部对齐。"""
     report = analyze(np.asarray(robot.jacob0(np.zeros(7))))
     assert report.is_singular
     assert report.manipulability < 1e-12
 
 
-def test_ik_report_mentions_the_frame_and_verifies_with_fk(robot):
-    """IK 报告不能只信求解器的 success 标志，位姿误差必须用 FK 复算一遍再说「成了」。"""
-    target = robots.end_pose(robot, Q_GOAL, robots.TCP)
-    report = panda_uc.ik_report(robot, target, Q_SEED, show_redundancy=False)
-    assert report.fields["success"] is True
-    assert report.fields["position_error"] < 1e-5
-
-
-def test_fk_report_shows_both_frames(robot):
-    """零位姿报告要把两种末端帧并排打出来 —— 这就是那个 0.103 m 之谜的说明。"""
-    report = panda_uc.fk_report(robot, np.zeros(7), frame=robots.FLANGE)
-    text = " ".join(line for block in report.blocks for line in getattr(block, "lines", ()))
-    assert "0.9260" in text and "0.8226" in text
-    assert report.fields["out_of_limits"] == [3]  # q4 越限位
-    # 齐次矩阵的合法性：最后一行
-    A = np.asarray(report.fields["A"])
-    assert A.shape == (4, 4) and np.allclose(A[3], [0, 0, 0, 1])
+def test_flange_and_tcp_differ_at_zero():
+    """零位姿下法兰与夹爪 TCP 差约 103.4mm。"""
+    robot = robots.panda(robots.FLANGE)
+    flange = np.asarray(robots.end_pose(robot, np.zeros(7), robots.FLANGE).t)
+    tcp = np.asarray(robots.end_pose(robot, np.zeros(7), robots.TCP).t)
+    assert np.isclose(flange[2], 0.9260, atol=5e-4)
+    assert np.isclose(tcp[2], 0.8226, atol=5e-4)

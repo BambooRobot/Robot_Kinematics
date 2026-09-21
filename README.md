@@ -1,11 +1,12 @@
 # robot_kinematics_app (rkin)
 
-**一条抓取任务流水线**：把机器人运动学的七个知识点串成七道工序 ——
+**一条 Franka Panda 抓取任务流水线**：把机器人运动学的七个知识点串成七道工序 ——
 观测 → 可达性预筛 → 多初值 IK → 雅可比体检 → 限位校验 → 解择优 → 微动校验，
 **并且会告诉你为什么失败**（六类失败结论，有名字、有数字）。
 
-运动学（FK / IK / 雅可比 / 关节限位）由 `spatialmath` + `roboticstoolbox` 提供；
-本项目写的是"用它们搭一条任务流水线"——可达性预筛、失败分类、解择优、微动校验，库都不提供。
+入口是扁平 CLI：`rkin --observe X Y Z`（无子命令）。运动学（FK / IK / 雅可比 / 关节限位）由
+`spatialmath` + `roboticstoolbox` 提供；本项目写的是"用它们搭一条任务流水线"——可达性预筛、
+失败分类、解择优、微动校验，库都不提供。
 
 > 📖 **第一次接触本项目 / 没学过机器人学？**
 > 先读 [`docs/GUIDE.md`](docs/GUIDE.md) —— 面向初学者的从零指南，
@@ -17,43 +18,32 @@
 
 ## 这个项目解决什么问题
 
-课件里那套实验（`0625robotics_python_lab_cloud_terminal`）是 12 个扁平脚本：公式在 4 个脚本里
-各抄一份、Panda 部分直接调库、`panda_cases.csv` 声明了却没有任何脚本读它 —— 而且
-**每一步都是孤立的**：算了 FK 不会用去判可达，解了 IK 不知道这组解能不能执行。
-
-本项目把它们重写成一套分层、可测试的工程，核心是**一条流水线**：
+课件里那套实验是一批扁平脚本：每一步彼此孤立 —— 算了 FK 不会用去判可达，解了 IK
+不知道这组解能不能执行。本项目把它们重写成一套分层、可测试的工程，核心是**一条流水线**：
 
 ```text
-main.py                   ★ 唯一入口 = 组合根，按四段读：
-                          ① 命令表（命令 → 处理函数）② 装配（唯一一处"选实现"）
-                          ③ 入口流程（解析→装配→查表→执行→渲染）④ 异常出口
+main.py                   ★ 唯一入口 = 组合根：
+                          ① 装配（唯一一处"选实现"）
+                          ② 入口流程（解析→装配→跑流水线→渲染）
+                          ③ 扁平参数定义（--observe 等）
                           想知道"这个程序用到哪些实现"，只看这一个文件
 
-usecases/                 用例：一条命令 = 一个函数（依赖全靠参数传入，不认识终端/文件）
-  pick                    ★ 抓取任务流水线（门面：工序序列 + 执行器）
+usecases/                 用例：只做抓取流水线（依赖靠参数传入，不认识终端/文件）
+  pick                    ★ 门面：工序序列 + 执行器
   pick_types                └ 词汇与数据契约：结论常量、Task/Params/Candidate/Result
   pick_steps                └ 七道工序：每道一个函数，失败时自己归类
   pick_report               └ 报什么（Report 的结构；怎么画是适配器的事）
-  pose                    位姿的几种表示互转（对应课件 01）
-  transforms              相机目标 → 机器人本体（对应课件 02）
-  planar                  二连杆 FK/IK/雅可比/奇异点（对应课件 03~07）
-  panda                   Panda FK/IK/雅可比/冗余（对应课件 08~10）
-  batch                   批量算例报告（对应课件 11，并补上 Panda 段）
-  env_check               环境自检（对应课件 00）
 
-contracts.py              契约：Report / 报告块 + 4 个协议
-                          Renderer · CaseSource · Plotter · KinematicsReference
+contracts.py              契约：Report / 报告块 + 协议（Renderer · Plotter · …）
 
-adapters/                 唯一认识外部世界的地方（实现上面的协议）
-  config_yaml             YAML 配置：未知项告警 + 范围校验 + 命令行覆盖 + 路径解析
-  cases_csv               读 data/cases/*.csv
-  render_text             终端文本（中文宽度对齐、表格、分节线 —— 布局都在这里）
+adapters/                 唯一认识外部世界的地方
+  config_yaml             YAML 配置：未知项告警 + 范围校验 + 命令行覆盖
+  render_text             终端文本
   render_json             同一份 Report 输出 JSON
   plot_mpl                matplotlib 出图 + 3D 不可用时的三视图回退
 
-core/                     库覆盖不到的那部分（约 500 行）
-  robots                  从库建模型：末端帧、关节限位、link 位置
-  planar2r ★              二连杆解析 FK/IK（库只给一组解，给不出"肘上/肘下"）
+core/                     库覆盖不到的那部分
+  robots                  从库建 Franka Panda：末端帧、关节限位、link 位置
   workspace ★             可达性预筛（库没有这个 API）
   singularity             SVD 体检 + 库的 manipulability
   exceptions              领域异常
@@ -69,10 +59,9 @@ core/                     库覆盖不到的那部分（约 500 行）
 | `core` | numpy + 运动学库 | 只做数学与模型构造，不认识契约、不做 IO |
 
 还有一条不是靠 import 而是靠"读代码顺序"的规矩：**除了 `main.py`，任何文件里都不该出现
-"造一个具体实现"** —— 于是"换成 JSON 渲染器""换个算例来源"都只改 `build_context` 一处。
+"造一个具体实现"** —— 于是"换成 JSON 渲染器""换个出图器"都只改 `build_context` 一处。
 
 用例产出的是 `Report`（结构化），所以同一份结果既能走终端，也能 `rkin --format json` 出 JSON。
-
 
 ## 明确不做
 
@@ -80,9 +69,10 @@ core/                     库覆盖不到的那部分（约 500 行）
 |---|---|
 | 真机控制、实时回路 | 那是控制器的事，不是运动学的事 |
 | 动力学、力控 | 本章不涉及 |
-| 真视觉 | 观测是**输入**（与脸门项目划清界限） |
+| 真视觉 | 观测是**输入** |
 | 避障与运动规划 | 只回答"这个位姿解不解得出来"，不回答"怎么绕过去" |
 | 相机标定 | 外参是给定常数 |
+| 其它机型 / 平面臂 | 本仓库只服务 Franka Panda |
 
 ## 依赖
 
@@ -102,67 +92,42 @@ cd robot_kinematics_app
 pip install -e .            # 依赖 + 命令行入口 rkin
 
 # 方式一：不安装，直接跑（推荐先这样试）
-PYTHONPATH=src python3 -m robotkinematics check
+PYTHONPATH=src python -m robotkinematics --observe 0.2 0 0
 
 # 方式二：安装成命令 `rkin`
 pip install -e .
-rkin check
+rkin --observe 0.2 0 0
 ```
 
 ## 用法
 
-**一条主线**（把七个知识点串成一个任务）：
+扁平入口，**没有子命令**：
 
 ```bash
-rkin pick --observe 0.2 0 0                   # 抓取：观测 → 关节解（含失败分类）
-rkin pick --observe 0.2 0 0 --plot            # 同一件事，再给一张任务图
-rkin pick --observe 0.2 0 0 --arm planar      # 二连杆跑同一条流水线（教学对照）
-rkin --format json pick --observe 0.2 0 0     # 同一份结果输出 JSON
+rkin --observe 0.2 0 0                              # 抓取：观测 → 关节解（含失败分类）
+rkin --observe 0.2 0 0 --plot                       # 同一件事，再给一张任务图
+rkin --observe 0.2 0 0 --format json                # 同一份结果输出 JSON
+rkin --observe 0.2 0 0 --mode base                  # 观测已是本体坐标，跳过相机变换
+rkin --observe 0.35 -0.05 0.15 --rpy 0 90 0          # 换抓取姿态（默认 180 0 0 = 自上而下）
+rkin --observe 0.2 0 0 --prefer-config 0 -0.3 0 -2.2 0 2.0 0.8
+rkin --observe 0.2 0 0 --seeds 32                   # 覆盖多初值个数
 ```
 
-**按知识点逐个验证**：
-
-```bash
-rkin check                                    # 环境自检
-rkin pose --xyz 0.4 0.2 0.3 --rpy 0 0 90      # 六元组 → R/T，RPY/轴角/四元数互转
-rkin cam --case ppt_case                      # 相机目标 → 本体（--all 跑整张算例表）
-rkin fk  --q1 0 --q2 90                       # 二连杆 FK（字符画 + 数值）
-rkin ik  --target 1 1                         # 两组解 + FK 回验
-rkin jac --q1 0 --q2 90 --dx 0 0.1            # J、dq、det、cond
-rkin sing                                     # 奇异点扫描表 → outputs/
-rkin panda-fk  --case ppt_goal [--plot]       # Panda FK（--q 也可直接给 7 个关节角）
-rkin panda-fk  --case zero --frame tcp        # 换成夹爪 TCP 帧（与课件日志一致）
-rkin panda-ik  --case ppt_goal                # 数值 IK + FK 回验 + 冗余演示
-rkin panda-jac --case ik_seed                 # 6×7 几何雅可比 + 奇异分析
-rkin panda-sing                               # 三个典型姿态的运动能力对比
-rkin anim --sweep q2 --frames 60              # 关节扫动 GIF
-rkin batch                                    # 批量算例报告 → outputs/
-rkin --format json panda-jac                  # 同一份报告输出 JSON（供别的程序调用）
-```
-
-配置在 `configs/default.yaml`。**命令行参数优先级高于配置文件**，且 `--l1` 这类开关
-写在子命令前后都可以：
-
-```bash
-rkin --l1 2 --l2 3 fk --q1 0 --q2 0
-rkin fk --l1 2 --l2 3 --q1 0 --q2 0     # 等价
-```
-
+配置在 `configs/default.yaml`。**命令行参数优先级高于配置文件**。
 程序按相对路径查找 `configs/` 与 `data/`，从项目根目录运行最省事。
 
 ## 验证
 
 ```bash
-make test-fast            # 6 秒跑完大部分断言（跳过 slow 标记的长搜索用例）
+make test-fast            # 快速跑完大部分断言（跳过 slow 标记的长搜索用例）
 make check-all            # 提交前跑这条：ruff + mypy + pytest
-bash scripts/run_all.sh   # 跑完全部命令，产物落到 outputs/
+bash scripts/run_all.sh   # 跑演示流水线，产物落到 outputs/
 ```
 
 判据（详见 `docs/NUMBERS.md`）：
-- `rkin batch` 的前两段与课件 `outputs/ppt_cases_batch_result.txt` **逐字符一致**；
-- 二连杆的**闭式解与库的 FK 逐位一致**（1e-12），其行列式与库的 `jacob0` 一致；
 - Panda 的 FK↔IK 往返残差 < 1e-5（库的 tol 是关节步长判据，换算到位姿就是这个量级）；
-- `rkin pick` 的六类失败结论各有端到端测试；二连杆解与闭式解逐位一致。
+- 可达性采样给出方向相关边界（工作空间不是球）；
+- `rkin --observe …` 的六类失败结论各有端到端测试。
 
 ## 已知环境问题
 

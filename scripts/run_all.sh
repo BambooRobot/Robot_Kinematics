@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 一键跑完全部演示：自检 → 全部 CLI 用例 → 批量报告 → 出图 → 测试。
-# 产物统一落到 outputs/，报告与图可以直接交作业。
+# 一键跑演示：Panda 抓取流水线（成功 / 失败对照）→ 出图 → 测试。
+# 产物统一落到 outputs/。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,46 +16,25 @@ fi
 
 step() { printf '\n\033[1;34m===== %s =====\033[0m\n' "$*"; }
 
-step "0. 环境自检（含运动学库 spatialmath / roboticstoolbox）"
-"${RKIN[@]}" check
+step "1. 抓取流水线（可达目标 + 任务图）"
+"${RKIN[@]}" --observe 0.2 0 0 --plot
 
-step "1. 位姿表示与坐标变换"
-"${RKIN[@]}" pose --xyz 0.4 0.2 0.3 --rpy 0 0 90 >/dev/null
-echo "pose 完成（数值见 tests/test_applications.py::test_pose_report_contains_the_course_point_transform）"
-"${RKIN[@]}" cam --all
+step "2. 同一份结果输出 JSON"
+"${RKIN[@]}" --observe 0.2 0 0 --format json >/dev/null
+echo "json 完成"
 
-step "2. 二连杆：FK / IK / 雅可比"
-"${RKIN[@]}" fk --q1 0 --q2 90
-"${RKIN[@]}" fk --q1 45 --q2 45 --plot
-"${RKIN[@]}" ik --target 1 1
-"${RKIN[@]}" jac --q1 0 --q2 90 --dx 0 0.1
-
-step "3. 奇异点扫描"
-"${RKIN[@]}" sing
-
-step "4. Franka Panda"
-"${RKIN[@]}" panda-fk --case ppt_goal --plot
-"${RKIN[@]}" panda-ik --case ppt_goal
-"${RKIN[@]}" panda-jac --case ik_seed
-"${RKIN[@]}" panda-sing
-
-step "4.5 抓取任务流水线（七个知识点串成一条）"
-"${RKIN[@]}" pick --observe 0.2 0 0 --plot
-"${RKIN[@]}" pick --observe 0.2 0 0 --arm planar --plot
-echo "—— 失败也是结论：同一个目标、只换抓取姿态，结论就不同"
+step "3. 失败也是结论：同一个目标、只换抓取姿态"
 echo "   （自上而下抓）"
-"${RKIN[@]}" pick --observe 0.35 -0.05 0.15 2>/dev/null | grep -E "^结论|^原因" || true
+"${RKIN[@]}" --observe 0.35 -0.05 0.15 2>/dev/null | grep -E "^结论|^原因" || true
 echo "   （换成侧面接近）"
-"${RKIN[@]}" pick --observe 0.35 -0.05 0.15 --rpy 0 90 0 2>/dev/null | grep -E "^结论|^原因" || true
+"${RKIN[@]}" --observe 0.35 -0.05 0.15 --rpy 0 90 0 2>/dev/null | grep -E "^结论|^原因" || true
 
-step "5. 出图与动画"
-"${RKIN[@]}" anim --sweep q2 --frames 48
-"${RKIN[@]}" anim --sweep q1 --frames 48
+step "4. 开关演示：--mode / --prefer-config / --seeds"
+"${RKIN[@]}" --observe 0.5 0 0.4 --mode base >/dev/null
+"${RKIN[@]}" --observe 0.2 0 0 --prefer-config 0 -0.3 0 -2.2 0 2.0 0.8 --seeds 16 >/dev/null
+echo "开关演示完成"
 
-step "6. 批量算例报告"
-"${RKIN[@]}" batch
-
-step "7. 测试"
+step "5. 测试"
 python3 -m pytest -q
 
 step "完成：产物清单"

@@ -39,13 +39,8 @@ jobs:
       - name: 测试（含覆盖率）
         run: pytest
 
-      - name: 端到端冒烟（跑一遍 CLI 与批量报告）
+      - name: 端到端冒烟（扁平 CLI 抓取流水线）
         run: |
-          rkin check
-          rkin batch
-          rkin pick --observe 0.35 -0.05 0.15
-          # 验收：落盘报告的前两段必须与课件交付物的数值逐条一致。
-          # 期望值内联在这里（不把课件原件放进仓库分发）。
-          grep -qF -- "- ppt_case: cup_base=[0.783  0.1634 0.8   ]" outputs/ppt_cases_batch_result.txt
-          grep -qF -- "- fk_60_minus30: FK tool=[1.366 1.366], detJ=-0.500000" outputs/ppt_cases_batch_result.txt
-          grep -qF -- "- ik_1_1: IK sols=(0.00°, 90.00°); (90.00°, -90.00°)" outputs/ppt_cases_batch_result.txt
+          rkin --observe 0.2 0 0
+          rkin --format json --observe 0.2 0 0 | grep -q outcome
+          rkin --observe 2 2 2 | grep -qF "不在工作空间"

@@ -1,11 +1,9 @@
 """@file cases.py
 
-@brief 读取 data/cases/*.csv：课件里的算例数据集。
+@brief 读取 data/cases/*.csv：可选算例数据集（流水线入口不依赖；供测试与扩展用）。
 
-三张表的列名与课件保持一致（不改列名，才能和课件输出逐条对照）：
   * coordinate_cases.csv —— camera frame 到 base frame 的坐标变换
-  * two_link_cases.csv   —— 二连杆 FK / IK / 奇异点（同一张表按“填了 q 还是填了 target”分流）
-  * panda_cases.csv      —— Panda 的三个演示姿态
+  * panda_cases.csv      —— Panda 的演示姿态
 """
 
 from __future__ import annotations
@@ -18,7 +16,6 @@ import numpy as np
 
 from ..core.exceptions import KinematicsError
 
-# 课件用的是带 BOM 的 CSV，用 utf-8-sig 读，否则第一个列名会多出
 _ENCODING = "utf-8-sig"
 
 
@@ -34,23 +31,6 @@ class CoordinateCase:
 
 
 @dataclass(frozen=True)
-class TwoLinkCase:
-    """二连杆算例：填了 q 就是 FK 算例，填了 target 就是 IK 算例。"""
-
-    case_id: str
-    l1: float
-    l2: float
-    description: str
-    q_deg: tuple[float, float] | None = None
-    target: tuple[float, float] | None = None
-
-    @property
-    def kind(self) -> str:
-        """这条算例是 FK（填了关节角）还是 IK（填了目标点）。"""
-        return "fk" if self.q_deg is not None else "ik"
-
-
-@dataclass(frozen=True)
 class PandaCase:
     """Panda 演示姿态。"""
 
@@ -60,12 +40,7 @@ class PandaCase:
 
 
 def load_coordinate_cases(directory: str | Path) -> list[CoordinateCase]:
-    """@brief 读 coordinate_cases.csv：相机→本体变换的算例。
-
-    @param directory 算例目录（通常是 configs 里的 paths.cases_dir）
-    @return 算例列表，顺序与 CSV 行序一致
-    @throws KinematicsError 文件不存在、或某个数值列不是数字
-    """
+    """@brief 读 coordinate_cases.csv：相机→本体变换的算例。"""
     rows = _read_rows(Path(directory) / "coordinate_cases.csv")
     return [
         CoordinateCase(
@@ -79,46 +54,8 @@ def load_coordinate_cases(directory: str | Path) -> list[CoordinateCase]:
     ]
 
 
-def load_two_link_cases(directory: str | Path) -> list[TwoLinkCase]:
-    """@brief 读 two_link_cases.csv：二连杆 FK / IK / 奇异点算例。
-
-    ⚠️ 同一张表里混着两类算例，靠"填了 q 还是填了 target"分流（见 TwoLinkCase.kind）。
-
-    @param directory 算例目录
-    @return 算例列表
-    @throws KinematicsError 文件不存在、数值列不是数字、或既没 q 也没 target
-    """
-    rows = _read_rows(Path(directory) / "two_link_cases.csv")
-    cases = []
-    for row in rows:
-        q = _optional_pair(row, "q1_deg", "q2_deg")
-        target = _optional_pair(row, "target_x", "target_y")
-        if q is None and target is None:
-            raise KinematicsError(
-                f"算例 {row.get('case_id')!r} 既没有关节角也没有目标点，无法判断是 FK 还是 IK"
-            )
-        cases.append(
-            TwoLinkCase(
-                case_id=_text(row, "case_id"),
-                l1=_number(row, "L1"),
-                l2=_number(row, "L2"),
-                description=row.get("description", ""),
-                q_deg=q,
-                target=target,
-            )
-        )
-    return cases
-
-
 def load_panda_cases(directory: str | Path) -> list[PandaCase]:
-    """@brief 读 panda_cases.csv：Panda 的三个演示姿态。
-
-    （课件里这个文件声明了却没有任何脚本读它 —— 本项目把它接进了批量报告。）
-
-    @param directory 算例目录
-    @return 算例列表，每个含 7 个关节角
-    @throws KinematicsError 文件不存在或关节角列缺失
-    """
+    """@brief 读 panda_cases.csv：Panda 演示姿态。"""
     rows = _read_rows(Path(directory) / "panda_cases.csv")
     cases = []
     for row in rows:
@@ -133,15 +70,12 @@ def load_panda_cases(directory: str | Path) -> list[PandaCase]:
     return cases
 
 
-# ── 内部工具 ────────────────────────────────────────────────────────────────
-
-
 def _read_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         raise KinematicsError(f"找不到算例文件: {path}")
     with path.open("r", encoding=_ENCODING, newline="") as fh:
         rows = [{k: (v or "").strip() for k, v in row.items() if k} for row in csv.DictReader(fh)]
-    return [row for row in rows if any(row.values())]  # 跳过空行
+    return [row for row in rows if any(row.values())]
 
 
 def _text(row: dict[str, str], key: str) -> str:
@@ -165,35 +99,14 @@ def _triple(row: dict[str, str], kx: str, ky: str, kz: str) -> tuple[float, floa
     return (_number(row, kx), _number(row, ky), _number(row, kz))
 
 
-def _optional_pair(row: dict[str, str], k1: str, k2: str) -> tuple[float, float] | None:
-    """CSV 里空白表示“这一列不适合本条算例”，返回 None 表示没填。"""
-    if not row.get(k1, "") or not row.get(k2, ""):
-        return None
-    return (_number(row, k1), _number(row, k2))
-
-
 class CsvCaseSource:
-    """实现 contracts.CaseSource 协议：从 data/cases/*.csv 读算例。
-
-    用例只认识 CaseSource 这个协议，所以将来把算例换成数据库或接口，
-    只需要再写一个适配器，用例一行都不用改。
-    """
+    """实现 contracts.CaseSource 协议：从 data/cases/*.csv 读算例。"""
 
     def __init__(self, directory: str | Path) -> None:
-        """@brief 指定算例目录。
-
-        @param directory 存放三个 CSV 的目录
-        """
         self.directory = Path(directory)
 
     def coordinate_cases(self) -> list[CoordinateCase]:
-        """@brief 见 load_coordinate_cases。"""
         return load_coordinate_cases(self.directory)
 
-    def two_link_cases(self) -> list[TwoLinkCase]:
-        """@brief 见 load_two_link_cases。"""
-        return load_two_link_cases(self.directory)
-
     def panda_cases(self) -> list[PandaCase]:
-        """@brief 见 load_panda_cases。"""
         return load_panda_cases(self.directory)

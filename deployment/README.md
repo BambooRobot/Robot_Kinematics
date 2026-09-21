@@ -4,7 +4,9 @@
 
 ```bash
 pip install -e .          # 依赖只声明在 pyproject.toml 一处
-rkin check
+PYTHONPATH=src python -m robotkinematics --observe 0.2 0 0
+# 或安装后：
+rkin --observe 0.2 0 0
 ```
 
 ## Docker (environment only)
@@ -14,9 +16,8 @@ docker compose -f deployment/docker/compose.yaml up -d --build
 docker compose -f deployment/docker/compose.yaml exec runtime bash
 
 # 容器里
-rkin check
-rkin batch                      # 报告写到 /app/outputs → 宿主机 ./outputs
-rkin panda-fk --case ppt_goal --plot
+rkin --observe 0.2 0 0 --plot           # 任务图写到 /app/outputs → 宿主机 ./outputs
+rkin --observe 0.2 0 0 --format json
 ```
 
 镜像基于 `debian:bookworm-slim`，装了 python3、中文字体（`fonts-noto-cjk`，

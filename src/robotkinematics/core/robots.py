@@ -1,14 +1,14 @@
 """@file robots.py
 
-@brief 机器人模型的构造与查询 —— 底层是 robotics toolbox，这里只做"配成我们需要的形态"。
+@brief Panda 模型的构造与查询 —— 底层是 robotics toolbox，这里只做"配成我们需要的形态"。
 
 【本层剩下的领域逻辑并不多，但都是库不提供的】
   * 末端帧的选择：库的 `Panda()` 自带夹爪，`fkine(q)` 默认返回**夹爪 TCP**，
     要拿法兰必须显式 `end="panda_link8"` —— 这个约定太容易忘，所以在这里封一层；
-  * 二连杆的杆长：`rtb.models.DH.Planar2()` 的 `a` 是只读属性，要改杆长只能自建 `DHRobot`；
   * 画骨架要的"每个 link 的原点"：库给的是 `fkine_all`，返回的是位姿对象，要摊平成位置数组。
 
 ⚠️ 除了这几处，本项目的运动学全部由库负责（FK / IK / 雅可比 / 限位 / 可操作度）。
+机器人固定为 Franka Panda。
 """
 
 from __future__ import annotations
@@ -50,35 +50,16 @@ def panda_end(frame: str = FLANGE) -> str | None:
     return PANDA_FLANGE_LINK if frame == FLANGE else None
 
 
-def planar(l1: float = 1.0, l2: float = 1.0) -> rtb.DHRobot:
-    """@brief 建一个平面二连杆模型。
-
-    ⚠️ 不用 `rtb.models.DH.Planar2()`：它的杆长 `a` 是只读属性，改不了 ——
-       要自定义杆长只能自建 DHRobot（详见 docs/GUIDE.md 第 7.7 节）。
-
-    @param l1 第一节（底座到肘）长度 [m]，必须为正
-    @param l2 第二节（肘到末端）长度 [m]，必须为正
-    @return 两关节的 DHRobot，末端就在第二节末端
-    @throws ValueError 任一杆长非正
-    """
-    if l1 <= 0 or l2 <= 0:
-        raise ValueError(f"连杆长度必须为正，收到 l1={l1}, l2={l2}")
-    return rtb.DHRobot(
-        [rtb.RevoluteDH(a=l1), rtb.RevoluteDH(a=l2)],
-        name=f"planar2r(L1={l1:g}, L2={l2:g})",
-    )
-
-
 def end_pose(robot: rtb.Robot, q: np.ndarray, frame: str = FLANGE) -> SE3:
     """@brief 算末端位姿（位置 + 姿态）。
 
-    @param robot robots toolbox 的模型实例
+    @param robot Panda 模型实例
     @param q 关节角 [rad]，一维数组，长度等于关节数
-    @param frame 末端帧；只对 Panda 有意义，其他模型（如二连杆）忽略
+    @param frame 末端帧：FLANGE 或 TCP
     @return 4×4 位姿对象（spatialmath.SE3）
     """
     q = np.asarray(q, dtype=float).reshape(-1)
-    end = panda_end(frame) if _is_panda(robot) else None
+    end = panda_end(frame)
     return robot.fkine(q, end=end) if end is not None else robot.fkine(q)
 
 
@@ -91,13 +72,13 @@ def end_positions(robot: rtb.Robot, qs: np.ndarray, frame: str = FLANGE) -> np.n
     ⚠️ 判别单/批量**不能**用 `isinstance(poses, SE3)`：批量返回的也是 SE3（值数组），
        而且它的 `.shape` 还报 (4,4)（骗人的）。只能看 `.t` 的维数：单个 (3,)，批量 (N,3)。
 
-    @param robot robots toolbox 的模型实例
+    @param robot Panda 模型实例
     @param qs 关节角，形状 (N, n)；传单个 (n,) 也可以
-    @param frame 末端帧；只对 Panda 有意义
+    @param frame 末端帧：FLANGE 或 TCP
     @return 位置矩阵，形状 (N, 3)；传单个姿态时返回 (1, 3)
     """
     qs = np.asarray(qs, dtype=float)
-    end = panda_end(frame) if _is_panda(robot) else None
+    end = panda_end(frame)
     poses = robot.fkine(qs, end=end) if end is not None else robot.fkine(qs)
     t = np.asarray(poses.t, dtype=float)
     if t.ndim == 1:  # 单个姿态
@@ -180,9 +161,3 @@ def out_of_limits(q: np.ndarray, limits: np.ndarray | None, tol: float = 1e-9) -
         if qi < lo - tol or qi > hi + tol
     ]
 
-
-def _is_panda(robot: rtb.Robot) -> bool:
-    """判断是不是 Panda 模型（名字里带 panda，或 link 名字以 panda_link 开头）。"""
-    return "panda" in (robot.name or "").lower() or any(
-        link.name.startswith("panda_link") for link in robot.links
-    )

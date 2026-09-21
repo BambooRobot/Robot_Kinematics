@@ -19,7 +19,6 @@ from ..contracts import (
     Report,
     TableBlock,
     TextBlock,
-    TwoLinkChartBlock,
     VectorBlock,
     fmt_vector,
 )
@@ -142,36 +141,4 @@ class TextRenderer:
             return f"{block.label}\n{format_matrix(block.matrix, block.digits)}"
         if isinstance(block, TableBlock):
             return table(block.headers, block.rows, block.aligns)
-        if isinstance(block, TwoLinkChartBlock):
-            # 网格与坐标范围用渲染器自己的默认值（画法不进契约层）
-            chart = ascii_two_link_chart(block.points)
-            return f"{block.label}\n{chart}" if block.label else chart
         raise KinematicsError(f"未知的报告块类型: {type(block).__name__}")
-
-
-def ascii_two_link_chart(points, size: int = 25, limit: float = 2.1) -> str:
-    """用字符画一条二连杆 —— 终端里也能看出姿态（不需要图形界面）。
-
-    网格 size×size，范围 [-limit, limit]，B=base、E=elbow、T=tool。
-    ⚠️ 这是"画法"，所以它在渲染器里；用例只提供 points（见 contracts.TwoLinkChartBlock）。
-    """
-    base, elbow, tool = points
-    grid = [[" "] * size for _ in range(size)]
-
-    def to_cell(point) -> tuple[int, int]:
-        col = round((point[0] + limit) / (2 * limit) * (size - 1))
-        row = round((limit - point[1]) / (2 * limit) * (size - 1))
-        return min(max(row, 0), size - 1), min(max(col, 0), size - 1)
-
-    for start, end in ((base, elbow), (elbow, tool)):
-        for t in np.linspace(0.0, 1.0, 18):
-            p = start + t * (end - start)
-            row, col = to_cell(p)
-            grid[row][col] = "*"
-    for marker, point in (("B", base), ("E", elbow), ("T", tool)):
-        row, col = to_cell(point)
-        grid[row][col] = marker
-
-    border = "+" + "-" * size + "+"
-    body = "\n".join("|" + "".join(row) + "|" for row in grid)
-    return f"{border}\n{body}\n{border}"

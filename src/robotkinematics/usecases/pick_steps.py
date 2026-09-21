@@ -1,12 +1,12 @@
 """@file pick_steps.py
 
-@brief 抓取流水线的**七道工序**：每一道一个函数，外加"失败时怎么归类"。
+@brief 抓取流水线的**七道工序**：每一道一个函数，外加"失败时怎么归类"。机器人固定为 Panda。
 
-七道工序（每一道对应第一章的一个知识点），以及每道工序由谁实现：
+七道工序（每一道对应一个知识点），以及每道工序由谁实现：
 
   ① 观测 → 本体位姿      位姿与坐标系、变换链        → spatialmath 的 SE3
   ② 可达性预筛            工作空间不是球              → 自研采样（库没有这个 API）
-  ③ 多初值 IK             IK 的多解 / 无解 / 迭代     → robot.ikine_LM；二连杆另有闭式解
+  ③ 多初值 IK             IK 的多解 / 无解 / 迭代     → robot.ikine_LM
   ④ 雅可比体检            雅可比与奇异点              → robot.jacob0 + numpy SVD
   ⑤ 限位校验              真机约束（关节限位）        → robot.qlim
   ⑥ 解择优                冗余与零空间                → 自研评分（库不提供）
@@ -16,12 +16,6 @@
 
   * 成功：把结果写进 `state` 的相关字段，并把这道工序的 `PickStep` 追加到 `state.steps`；
   * 失败：返回一个 `Failure`（有名字的结论 + 一句人话），**整条流水线就此停下**。
-
-"停下"这个决定由 `pick.py` 里的执行器做，本文件里的工序只负责"报告我失败了、原因是这个"。
-于是"每道工序都能独立失败、独立验证"这句话才落在结构上，而不只是文档里的口号。
-
-⚠️ 工序之间的顺序由 `PIPELINE` 保证，所以后面的工序可以认为前面写好的字段一定就绪
-   （函数开头的 assert 是内部不变量，不是输入校验）。
 """
 
 from __future__ import annotations
@@ -56,9 +50,6 @@ from .pick_types import (
 Step = Callable[[rtb.Robot, PickTask, PickParams, PipelineState], "Failure | None"]
 
 
-# ── ① 观测 → 本体位姿 ───────────────────────────────────────────────────────
-
-
 def step_locate(
     robot: rtb.Robot, task: PickTask, params: PickParams, state: PipelineState
 ) -> Failure | None:
@@ -76,16 +67,8 @@ def step_locate(
         point_base = observation
         detail = f"观测已在本体坐标系：{fmt_vector(point_base)}"
 
-    if task.is_planar:
-        # 二连杆只在 x-y 平面里动：z 与姿态都没有自由度，如实说明而不是假装约束满足
-        ignored = float(point_base[2])
-        target = SE3(point_base[0], point_base[1], 0.0)
-        detail += (
-            f"；二连杆只有平面两个自由度 → 投影到 x-y 平面，忽略 z={ignored:+.4f} m 与姿态要求"
-        )
-    else:
-        roll, pitch, yaw = DEG(task.orientation_rpy_deg)
-        target = SE3(point_base) * SE3.RPY(roll, pitch, yaw, order=RPY_ORDER)
+    roll, pitch, yaw = DEG(task.orientation_rpy_deg)
+    target = SE3(point_base) * SE3.RPY(roll, pitch, yaw, order=RPY_ORDER)
 
     state.target = target
     state.steps.append(
@@ -102,14 +85,11 @@ def step_locate(
     return None
 
 
-# ── ② 可达性预筛 ────────────────────────────────────────────────────────────
-
-
 def step_prescreen(
     robot: rtb.Robot, task: PickTask, params: PickParams, state: PipelineState
 ) -> Failure | None:
     """② 可达性预筛（知识点：工作空间不是球）。"""
-    assert state.target is not None  # ① 已经写好
+    assert state.target is not None
     limits = robots.joint_limits(robot)
     reach = workspace.directional_reach(
         robot,
@@ -141,84 +121,50 @@ def step_prescreen(
     return None
 
 
-# ── ③ 多初值 IK ─────────────────────────────────────────────────────────────
-
-
 def step_solve(
     robot: rtb.Robot, task: PickTask, params: PickParams, state: PipelineState
 ) -> Failure | None:
-    """③ 多初值 IK（知识点：IK 的多解 / 无解 / 数值迭代）。
-
-    初值集合 = 初始位形 + **二连杆的闭式解**（有解析解就该拿它当暖启动）+ 随机构造。
-    求解一律交给库的 `ikine_LM`；二连杆的闭式解另用来反向校验数值解。
-
-    没有候选解时在这里就归类（"够不着"还是"没解出来"），而不是把判断留给执行器 ——
-    怎么解释失败，是这一步自己的知识。
-    """
+    """③ 多初值 IK（知识点：IK 的多解 / 无解 / 数值迭代）。"""
     assert state.target is not None
     n = robot.n
     candidates: list[PickCandidate] = []
     best_residual = float("inf")
 
-    if task.is_planar:
-        # 二连杆：候选解直接来自闭式解 —— 它同时给出"肘上/肘下"两组，这正是本节考点。
-        # ⚠️ 不用库的 ikine_LM：给平面机器人传 mask（"只管位置"）会因库内部权重矩阵
-        #    与被筛过后的误差向量维数不匹配而抛错（实测 RTB 1.4.3）；不传 mask 又要求
-        #    它同时满足平面机械臂根本做不到的姿态。所以这一处的分工是刻意的。
-        for index, sol in enumerate(_analytic_seeds(task, state.target)):
-            q = np.asarray(sol, dtype=float).reshape(n)
-            residual, pos_err, ori_err = _task_error(robot, state.target, q, task)
-            best_residual = min(best_residual, residual)
+    seeds = [task.home(n)]
+    rng = np.random.default_rng(params.workspace_seed + 1)
+    seeds += [rng.uniform(-1.5, 1.5, size=n) for _ in range(max(params.seeds - 1, 0))]
+
+    for index, seed in enumerate(seeds):
+        # ⚠️ 不传 end：库的 IK 只对模型默认末端求解。抓取的末端就该是夹爪（见 PickTask.frame）
+        solution = robot.ikine_LM(
+            state.target,
+            q0=np.asarray(seed, dtype=float).reshape(n),
+            ilimit=params.max_iter,
+            tol=params.ik_tol,
+        )
+        q = np.asarray(solution.q, dtype=float).reshape(n)
+        residual, pos_err, ori_err = _task_error(robot, state.target, q, task)
+        best_residual = min(best_residual, residual)
+        if residual <= params.residual_tol:
             candidates.append(_candidate(q, index, residual, pos_err, ori_err))
-        detail = (
-            f"闭式解（余弦定理）给出 {len(candidates)} 组解，"
-            f"最佳任务残差 {best_residual:.2e}（解析解是精确解，只受浮点精度限制）"
-        )
-        numbers = {
-            "source": "闭式解（平面机械臂；库的 IK 无法表达“只管位置”）",
-            "solutions": len(candidates),
-            "best_residual": best_residual,
-            "residual_tol": params.residual_tol,
-        }
-    else:
-        # Panda：多初值 + 库的 ikine_LM（LM 迭代）
-        seeds = [task.home(n)]
-        rng = np.random.default_rng(params.workspace_seed + 1)
-        seeds += [rng.uniform(-1.5, 1.5, size=n) for _ in range(max(params.seeds - 1, 0))]
 
-        for index, seed in enumerate(seeds):
-            # ⚠️ 不传 end：库的 IK 只对模型默认末端求解。抓取的末端就该是夹爪（见 PickTask.frame）
-            # ⚠️ 库的 `tol` 是**关节步长**的收敛判据，位姿残差是结果而不是输入：
-            #    用默认值它会停在 ~1e-6 的步长上，位姿残差能到 0.8mm；传 1e-9 才压到 1e-7 量级。
-            solution = robot.ikine_LM(
-                state.target,
-                q0=np.asarray(seed, dtype=float).reshape(n),
-                ilimit=params.max_iter,
-                tol=params.ik_tol,
-            )
-            q = np.asarray(solution.q, dtype=float).reshape(n)
-            residual, pos_err, ori_err = _task_error(robot, state.target, q, task)
-            best_residual = min(best_residual, residual)
-            if residual <= params.residual_tol:
-                candidates.append(_candidate(q, index, residual, pos_err, ori_err))
-
-        detail = (
-            f"{len(seeds)} 个初值 → 收敛 {len(candidates)} 个"
-            f"（判据：任务残差 < {params.residual_tol:.0e}，最佳 {best_residual:.2e}）"
-        )
-        numbers = {
-            "seeds": len(seeds),
-            "converged": len(candidates),
-            "best_residual": best_residual,
-            "residual_tol": params.residual_tol,
-        }
+    detail = (
+        f"{len(seeds)} 个初值 → 收敛 {len(candidates)} 个"
+        f"（判据：任务残差 < {params.residual_tol:.0e}，最佳 {best_residual:.2e}）"
+    )
+    numbers = {
+        "seeds": len(seeds),
+        "converged": len(candidates),
+        "best_residual": best_residual,
+        "residual_tol": params.residual_tol,
+    }
 
     state.candidates = candidates
     state.best_residual = best_residual
     state.steps.append(PickStep(name="③ 多初值 IK", detail=detail, numbers=numbers))
 
     if not candidates:
-        assert state.reach is not None  # ② 已经写好
+        assert state.reach is not None
         classified = classify_no_candidate(task, state.reach, state.target, best_residual, params)
         return Failure(*classified)
     return None
@@ -241,27 +187,11 @@ def _candidate(
     )
 
 
-def _analytic_seeds(task: PickTask, target: SE3) -> list[np.ndarray]:
-    """二连杆的闭式解作为暖启动 —— 有解析解就该用。"""
-    if not task.is_planar or task.planar is None:
-        return []
-    return [np.array(sol) for sol in task.planar.ik(float(target.t[0]), float(target.t[1]))]
-
-
-# ── ④ 雅可比体检 与 ⑤ 限位校验（一次遍历，作为两道工序分别报告）─────────────
-
-
 def step_inspect(
     robot: rtb.Robot, task: PickTask, params: PickParams, state: PipelineState
 ) -> Failure | None:
-    """④ 雅可比体检 与 ⑤ 限位校验。
-
-    两者的物理含义完全不同：一个是"这组解好不好动"，一个是"真机能不能摆出来"，
-    所以分成两道工序报告；但遍历候选只做一次（同一份数据算两件事）。
-
-    所有解都被淘汰时在这里归类 —— 同样是这一步自己的知识。
-    """
-    from ..core.singularity import analyze  # 局部导入避免循环
+    """④ 雅可比体检 与 ⑤ 限位校验。"""
+    from ..core.singularity import analyze
 
     limits = robots.joint_limits(robot)
     margin_required = DEG(params.limit_margin_deg)
@@ -332,17 +262,10 @@ def step_inspect(
     return None
 
 
-# ── ⑥ 解择优 ────────────────────────────────────────────────────────────────
-
-
 def step_choose(
     robot: rtb.Robot, task: PickTask, params: PickParams, state: PipelineState
 ) -> Failure | None:
-    """⑥ 解择优（知识点：冗余与零空间）。
-
-    评分把三件事加权：离关节限位还有多少余地、σ_min（好不好动）、离偏好位形多远
-    （"就近择优"—— 不做这一项，数值 IK 可能给出关节转了两圈多的解）。
-    """
+    """⑥ 解择优（知识点：冗余与零空间）。"""
     survivors = [c for c in state.candidates if c.survived]
     best = max(survivors, key=lambda c: c.score)
     state.best = best
@@ -369,10 +292,7 @@ def step_choose(
 def score_candidate(
     q: np.ndarray, sigma_min: float, sigma_max: float, limit_margin: float, task: PickTask
 ) -> float:
-    """解择优的评分：限位余量 + σ_min + 离偏好位形，各项归一化后加权。
-
-    限位项拿满分的两种情况：没有限位信息（inf），或余量 ≥ 45°。
-    """
+    """解择优的评分：限位余量 + σ_min + 离偏好位形，各项归一化后加权。"""
     w_limit, w_sigma, w_prefer = SCORE_WEIGHTS
     limit_score = (
         0.5
@@ -385,26 +305,16 @@ def score_candidate(
     return w_limit * limit_score + w_sigma * sigma_score + w_prefer * prefer_score
 
 
-# ── ⑦ 微动可行性校验 ────────────────────────────────────────────────────────
-
-
 def step_micro_motion(
     robot: rtb.Robot, task: PickTask, params: PickParams, state: PipelineState
 ) -> Failure | None:
-    """⑦ 微动可行性校验：用雅可比解一次小位移（知识点：雅可比干活）。
+    """⑦ 微动可行性校验：用雅可比解一次小位移。"""
+    assert state.best is not None
+    J = np.asarray(robot.jacob0(state.best.q), dtype=float)[:6, :]
+    delta = np.zeros(6)
+    delta[2] = -params.micro_step_m  # 末端沿 z 压 1mm
 
-    抓取前总要"往下压一点再合爪"。这一步就是在算：这 1mm 压下去，关节要动多少？
-    如果算出来的关节角大得离谱（接近奇异点），这组解在实际中就不能用。
-    """
-    assert state.best is not None  # ⑥ 已经写好
-    J = np.asarray(robot.jacob0(state.best.q), dtype=float)
-    rows = 2 if task.is_planar else 6
-    J = J[:rows, :]
-    delta = np.zeros(rows)
-    delta[2 if rows > 2 else 0] = -params.micro_step_m  # 平面情形退化为沿 x 的 1mm
-
-    # 阻尼最小二乘求 dq —— 这里也交给 numpy 解线性方程组
-    dq = np.linalg.solve(J @ J.T + (0.05**2) * np.eye(rows), delta)
+    dq = np.linalg.solve(J @ J.T + (0.05**2) * np.eye(6), delta)
     dq = J.T @ dq
 
     joint_step_deg = float(np.rad2deg(np.linalg.norm(dq)))
@@ -431,8 +341,6 @@ def step_micro_motion(
     return None
 
 
-# ── 工序序列：这就是"七道工序"本身 ──────────────────────────────────────────
-
 PIPELINE: tuple[Step, ...] = (
     step_locate,
     step_prescreen,
@@ -441,12 +349,6 @@ PIPELINE: tuple[Step, ...] = (
     step_choose,
     step_micro_motion,
 )
-
-
-# ── 失败归类 ────────────────────────────────────────────────────────────────
-#
-# 这些函数是**公开**的：它们是"失败词汇"的实现，测试直接验它们（见 tests/usecases/test_pick.py）。
-# 每一条都要给出"为什么失败 + 下一步能怎么改"，而不是一句"失败了"。
 
 
 def classify_no_candidate(
@@ -466,12 +368,6 @@ def classify_no_candidate(
             f"沿该方向差 {abs(margin):.4f} m（换方向或挪机器人，换初值没用）",
         )
     if best_residual > params.unreachable_residual:
-        if task.is_planar:
-            return (
-                OUTCOME_RESIDUAL_TOO_LARGE,
-                f"位置在可达范围内（余量 {margin:+.4f} m）却没解出来：最佳任务残差 "
-                f"{best_residual:.4f} > {params.unreachable_residual}，属于数值求解问题而非物理限制",
-            )
         return (
             OUTCOME_POSE_NOT_REACHABLE,
             f"位置在可达范围内（余量 {margin:+.4f} m），但指定姿态达不到：最佳任务残差 "
@@ -507,26 +403,15 @@ def reject_reason(candidates: list[PickCandidate]) -> str:
     )
 
 
-# ── 工序内部用到的度量 ──────────────────────────────────────────────────────
-
-
 def _task_error(
     robot: rtb.Robot, target: SE3, q: np.ndarray, task: PickTask
 ) -> tuple[float, float, float]:
-    """返回 (任务残差, 位置误差, 姿态误差)。
+    """返回 (任务残差, 位置误差, 姿态误差)。"""
+    from spatialmath.base import tr2angvec
 
-    ⚠️ 不能拿完整 6 维位姿误差来判定：二连杆只有平面两个自由度，姿态误差恒为 ~1.45 rad，
-       用它判定会把"位置解得很好"误判成失败。所以任务残差只统计 mask 打开的那几维。
-    """
     reached = robots.end_pose(robot, q, task.frame)
     dp = np.asarray(target.t, dtype=float) - np.asarray(reached.t, dtype=float)
     position_error = float(np.linalg.norm(dp))
-
-    if task.is_planar:
-        return position_error, position_error, 0.0
-
-    from spatialmath.base import tr2angvec
-
     angle, axis = tr2angvec(np.asarray(target.R) @ np.asarray(reached.R).T)
     orientation_error = float(abs(angle))
     return (

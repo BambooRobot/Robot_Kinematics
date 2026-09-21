@@ -16,10 +16,8 @@ from ..contracts import (
     Report,
     TableBlock,
     TextBlock,
-    TwoLinkChartBlock,
     fmt_vector,
 )
-from ..core.planar2r import Planar2R
 from .pick_types import PickResult, PickTask
 
 
@@ -27,8 +25,7 @@ def to_report(task: PickTask, result: PickResult) -> Report:
     """把任务结果渲染成报告（终端 / JSON 都由适配器决定）。"""
     blocks: list = [
         TextBlock.of(
-            f"机械臂：{task.arm}"
-            + ("（末端：夹爪 TCP）" if not task.is_planar else "（二连杆，末端=tool）"),
+            "机械臂：Panda（末端：夹爪 TCP）",
             f"目标位姿：位置 {fmt_vector(np.asarray(result.target.t, dtype=float))}",
             f"结论：{result.outcome}",
             f"原因：{result.reason}",
@@ -69,14 +66,6 @@ def to_report(task: PickTask, result: PickResult) -> Report:
                 ("<", ">", ">", ">", ">", "<"),
             ),
         ]
-    if task.is_planar and result.q is not None:
-        arm = task.planar or Planar2R()
-        blocks.append(
-            TwoLinkChartBlock(
-                points=arm.joint_points(float(result.q[0]), float(result.q[1])),
-                label="机械臂姿态",
-            )
-        )
 
     return Report(
         title="抓取任务流水线",
@@ -84,7 +73,7 @@ def to_report(task: PickTask, result: PickResult) -> Report:
         fields={
             "outcome": result.outcome,
             "reason": result.reason,
-            "arm": task.arm,
+            "arm": "panda",
             "frame": task.frame,
             "target_position": np.asarray(result.target.t, dtype=float),
             "q": result.q,

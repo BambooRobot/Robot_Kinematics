@@ -52,33 +52,32 @@ MUTED = "#475569"
 LAYERS = [
     (
         "入口 · main.py",
-        "唯一入口 = 组合根：命令表一览 + 全部装配 + 渲染 + 唯一的异常出口",
+        "唯一入口 = 组合根：扁平 CLI + 全部装配 + 渲染 + 唯一的异常出口",
         "cli",
         [
-            "① 命令表 —— 命令 → 处理函数（一眼看全部能力）",
-            "② 装配 —— 全工程唯一一处“选实现”",
-            "③ 入口流程 + 异常出口",
-            "④ 处理函数 —— 一条命令一个",
+            "① 装配 —— 全工程唯一一处“选实现”",
+            "② 入口流程 —— 解析 → 跑流水线 → 渲染",
+            "③ 扁平参数 —— rkin --observe X Y Z …",
+            "④ 异常出口 —— 唯一顶层捕获",
         ],
     ),
     (
         "用例层 · usecases",
-        "编排 + 产出 Report：不认识终端、不写文件、不认识 matplotlib",
+        "只做抓取流水线：编排 + 产出 Report；不认识终端 / 文件 / matplotlib",
         "usecases",
         [
             "pick.py ★ —— 抓取流水线（七道工序 + 六类结论）",
-            "pose / transforms —— 位姿表示、相机 → 本体变换链",
-            "planar / panda —— 二连杆与 Panda 的 FK / IK / 雅可比",
-            "batch / env_check —— 批量算例、环境自检",
+            "pick_types —— 结论常量、Task / Params / Result",
+            "pick_steps —— 七道工序，失败时自己归类",
+            "pick_report —— Report 结构（怎么画是适配器的事）",
         ],
     ),
     (
         "适配层 · adapters",
-        "唯一认识外部世界的地方 —— 第三方库只出现在这一层的三个文件里",
+        "唯一认识外部世界的地方 —— 配置 / 渲染 / 绘图",
         "adapters",
         [
             "config_yaml.py —— YAML + 未知项告警 + 范围校验",
-            "cases_csv.py —— 读 data/cases/*.csv",
             "render_text / render_json —— 同一份 Report 的两种呈现",
             "plot_mpl.py —— 出图（3D 不可用时回退三视图）",
         ],
@@ -88,8 +87,7 @@ LAYERS = [
         "库覆盖不到的那部分（★ = 仍然自己写的）；其余运动学全部交给库",
         "core",
         [
-            "robots.py —— 从库建模型：末端帧、限位、link 位置",
-            "planar2r.py ★ —— 二连杆解析 FK/IK（库给不出两组解）",
+            "robots.py —— 从库建 Panda：末端帧、限位、link 位置",
             "workspace.py ★ —— 可达性采样（库没有这个 API）",
             "singularity.py —— SVD 体检 + 库的 manipulability",
             "exceptions.py —— 领域异常（可达 / 收敛 / 奇异）",
@@ -131,7 +129,7 @@ CONFIG_CARDS = [
 KEY_NUMBERS = (
     "可达边界是采样估计（固定 seed，可复现）：全方向最大 1.19 m，但沿斜下方只有 1.09 m —— 工作空间不是球  ｜  "
     "评分权重 0.5 / 0.3 / 0.2 写在 pick.SCORE_WEIGHTS 里，可审计  ｜  "
-    "170 条断言 · 自研的两处（闭式解 / 可达采样）均与库逐位对照"
+    "Franka Panda only · 扁平 CLI：rkin --observe X Y Z · 自研可达采样与库对照"
 )
 
 
@@ -331,9 +329,9 @@ def draw_layers(ax) -> None:
 def draw_pipeline(ax) -> None:
     """右panel：抓取流水线。步骤之间标注传递的数据。"""
     x0, w = 64.0, 24.5
-    ax.text(x0, 91, "抓取流水线 · rkin pick", fontsize=12.5, fontweight="bold", color=TEXT)
+    ax.text(x0, 91, "抓取流水线 · rkin --observe", fontsize=12.5, fontweight="bold", color=TEXT)
     ax.text(
-        x0, 88.2, "一条命令跑完七道工序；每一步都能独立失败、独立验证", fontsize=8.5, color=MUTED
+        x0, 88.2, "扁平 CLI 一条命令跑完七道工序；每一步都能独立失败、独立验证", fontsize=8.5, color=MUTED
     )
 
     top, bottom = 86.5, 30.0

@@ -74,20 +74,6 @@ def test_link_points_shape_for_skeleton(panda):
     assert np.allclose(points[0], np.zeros(3))  # 第一个点是 base 原点
 
 
-def test_planar_robot_accepts_custom_link_lengths():
-    """库的 Planar2 杆长只读，所以本项目自建 DHRobot —— 这里验证自建的那个是对的。"""
-    robot = robots.planar(l1=0.7, l2=1.3)
-    assert robot.n == 2
-    assert np.allclose(np.asarray(robot.fkine([np.pi / 2, 0]).t)[:2], [0.0, 2.0], atol=1e-9)
-    assert np.allclose(np.asarray(robot.fkine([0, 0]).t)[:2], [2.0, 0.0], atol=1e-9)
-
-
-def test_planar_rejects_nonpositive_links():
-    """自建的那个二连杆 DHRobot 也要做杆长校验，非正杆长一律拒收。"""
-    with pytest.raises(ValueError):
-        robots.planar(l1=0.0, l2=1.0)
-
-
 def test_unknown_frame_is_rejected():
     """未知末端帧名必须报错，不能悄悄退回默认帧 —— 那正是 0.103m 对不上的成因。"""
     with pytest.raises(ValueError):

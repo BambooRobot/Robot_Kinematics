@@ -11,12 +11,11 @@ from robotkinematics.adapters.config_yaml import Config, resolve_path
 from robotkinematics.core.exceptions import KinematicsError
 
 VALID_YAML = """
-planar:
-  l1: 0.7
-  l2: 1.3
+camera:
+  x: 0.25
 ik:
-  dls_lambda: 0.02
   max_iter: 123
+  tol: 1.0e-8
 """
 
 
@@ -29,83 +28,77 @@ def _write(tmp_path, text: str) -> str:
 def test_default_config_file_loads():
     """项目自带的 configs/default.yaml 必须能读通。"""
     config = Config.from_yaml()
-    assert config.planar.l1 > 0 and config.planar.l2 > 0
     assert config.ik.max_iter >= 1
+    assert config.pick.seeds >= 1
     assert config.source.endswith("default.yaml")
 
 
 def test_yaml_values_override_defaults(tmp_path):
     """yaml 里写了的项覆盖默认值，没写的项保持默认。"""
     config = Config.from_yaml(_write(tmp_path, VALID_YAML))
-    assert config.planar.l1 == 0.7
-    assert config.planar.l2 == 1.3
-    assert config.ik.dls_lambda == 0.02
+    assert config.camera.x == 0.25
     assert config.ik.max_iter == 123
-    # 没写的项保持默认值
-    assert config.singularity.cond_warn == 100.0
+    assert config.ik.tol == 1.0e-8
+    assert config.pick.seeds == 24
 
 
 def test_command_line_overrides_win(tmp_path):
-    """命令行优先级高于配置文件 —— 配置文件写默认值，命令行做一次性试验。"""
-    config = Config.from_yaml(_write(tmp_path, VALID_YAML)).override(planar_l1=2.5, ik_max_iter=9)
-    assert config.planar.l1 == 2.5
-    assert config.planar.l2 == 1.3  # 没被覆盖的项不动
+    """命令行优先级高于配置文件。"""
+    config = Config.from_yaml(_write(tmp_path, VALID_YAML)).override(ik_max_iter=9)
     assert config.ik.max_iter == 9
+    assert config.ik.tol == 1.0e-8
 
 
 def test_none_values_in_override_are_ignored(tmp_path):
     """命令行没传的参数是 None，不能把配置里的值清成 None。"""
-    config = Config.from_yaml(_write(tmp_path, VALID_YAML)).override(planar_l2=None)
-    assert config.planar.l2 == 1.3
+    config = Config.from_yaml(_write(tmp_path, VALID_YAML)).override(ik_tol=None)
+    assert config.ik.tol == 1.0e-8
 
 
 def test_unknown_key_warns_instead_of_silently_ignoring(tmp_path, capsys):
-    """顶层键拼错要告警并忽略，不能让错误配置悄悄生效。"""
+    """顶层键拼错要告警并忽略。"""
     config = Config.from_yaml(_write(tmp_path, VALID_YAML + "\nplaenar:\n  l1: 9.9\n"))
     captured = capsys.readouterr()
     assert "plaenar" in captured.err
     assert "无法识别" in captured.err
-    assert config.planar.l1 == 0.7  # 拼错的那段没有生效
+    assert config.camera.x == 0.25
 
 
 def test_unknown_field_inside_a_section_warns(tmp_path, capsys):
-    """段落里拼错的字段同样要告警，且要点名到 planar.l3。"""
-    Config.from_yaml(_write(tmp_path, "planar:\n  l1: 1.0\n  l3: 2.0\n"))
-    assert "planar.l3" in capsys.readouterr().err
+    """段落里拼错的字段同样要告警。"""
+    Config.from_yaml(_write(tmp_path, "ik:\n  max_iter: 10\n  nope: 2.0\n"))
+    assert "ik.nope" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     "yaml_text",
     [
-        "planar:\n  l1: 0\n",  # 连杆长度必须为正
-        "planar:\n  l1: -1\n",
-        "ik:\n  max_iter: 0\n",  # 迭代次数至少 1
-        "ik:\n  step: 2.0\n",  # 步长缩放必须在 (0,1]
+        "ik:\n  max_iter: 0\n",
         "ik:\n  tol: 0\n",
-        "singularity:\n  cond_warn: 0.5\n",
+        "pick:\n  seeds: 0\n",
     ],
 )
 def test_out_of_range_values_are_rejected(tmp_path, yaml_text):
-    """越界参数一律拒绝：连杆长度、迭代次数、步长缩放、容差、条件数阈值。"""
+    """越界参数一律拒绝。"""
     with pytest.raises(KinematicsError):
         Config.from_yaml(_write(tmp_path, yaml_text))
 
 
 def test_non_numeric_value_is_rejected(tmp_path):
-    """非数值配置项要报错，不能糊弄成字符串或 NaN 带进计算。"""
+    """非数值配置项要报错。"""
     with pytest.raises(KinematicsError):
-        Config.from_yaml(_write(tmp_path, "planar:\n  l1: abc\n"))
+        Config.from_yaml(_write(tmp_path, "ik:\n  max_iter: abc\n"))
 
 
 def test_missing_file_is_reported_clearly(tmp_path):
-    """配置文件不存在时要提示“无法打开配置文件”，而不是抛底层异常。"""
+    """配置文件不存在时要提示无法打开。"""
     with pytest.raises(KinematicsError) as excinfo:
         Config.from_yaml(tmp_path / "not-there.yaml")
     assert "无法打开配置文件" in str(excinfo.value)
 
 
 def test_unknown_override_key_is_rejected():
-    """命令行传了不存在的参数要报错，防止笔误被静默吞掉。"""
+    """命令行传了不存在的参数要报错。"""
     with pytest.raises(KinematicsError):
         Config().override(nosuch_field=1)
 
@@ -113,17 +106,12 @@ def test_unknown_override_key_is_rejected():
 def test_resolve_path_prefers_cwd_then_project_root():
     """相对路径先按当前目录找、再退回工程根目录；绝对路径原样返回。"""
     assert resolve_path("configs/default.yaml").exists()
-    # 绝对路径原样返回
-    assert resolve_path("/tmp").as_posix() == "/tmp"
+    absolute = resolve_path("/tmp")
+    assert absolute.is_absolute()
 
 
 def test_project_root_points_at_the_repo_root():
-    """`PROJECT_ROOT` 必须真的指向项目根 —— 上面那条测试守不住它。
-
-    ⚠️ 因为 `resolve_path` 是 **CWD 优先**，而 pytest 都在仓库根跑，
-       `configs/default.yaml` 在 CWD 就命中了，永远走不到 PROJECT_ROOT 那一行。
-       也就是说 `parents[n]` 写错时，上面那条测试照样全绿 —— 这条才钉得住。
-    """
+    """`PROJECT_ROOT` 必须真的指向项目根。"""
     from robotkinematics.adapters.config_yaml import PROJECT_ROOT
 
     assert (PROJECT_ROOT / "pyproject.toml").is_file(), PROJECT_ROOT

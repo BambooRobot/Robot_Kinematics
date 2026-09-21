@@ -24,17 +24,17 @@
 
 ## 第 0 章 · 这个项目是什么
 
-对应课程**第一章《具身智能机器人学基础》**。课件那套实验是 12 个扁平脚本：公式在多个脚本里
-各抄一份、Panda 部分直接调库、每一步彼此孤立 —— 算了 FK 不会用去判可达，解了 IK 不知道
-这组解能不能执行。
+对应课程**第一章《具身智能机器人学基础》**。课件那套实验是一批扁平脚本：每一步彼此孤立 ——
+算了 FK 不会用去判可达，解了 IK 不知道这组解能不能执行。
 
-本项目重写成一条**抓取任务流水线**：七道工序，每道对应一个知识点，**并且会告诉你为什么失败**。
+本项目重写成一条 **Franka Panda 抓取任务流水线**：七道工序，每道对应一个知识点，
+**并且会告诉你为什么失败**。入口是扁平 CLI：`rkin --observe X Y Z`（无子命令）。
 
 | 谁做什么 | 内容 |
 |---|---|
 | **库负责**（spatialmath + roboticstoolbox） | FK、IK（数值）、雅可比、关节限位、可操作度、SE3 表示 |
 | **本项目负责** | 可达性预筛、多初值搜索、解择优、微动校验、失败分类、一条命令的编排 |
-| **两处仍然自己写** | 二连杆的**闭式解**（库只给一组解）、**可达性采样**（库没有这个 API） |
+| **仍然自己写** | **可达性采样**（库没有这个 API；`robot.reach` 实测返回 0） |
 
 ⚠️ 这个定位很重要：本项目**不是**"自己实现运动学"，而是"**用运动学库搭一条任务流水线**"。
 所以代码里没有推导公式，取而代之的是"库怎么用、它的坑在哪"——后者才是这份文档的重点。
@@ -63,7 +63,7 @@
 
 必须建立的直觉：**FK 永远有唯一答案，IK 不一定**。
 
-- IK 可能**多解**：二连杆把末端送到 (1,1)，可以肘朝上，也可以肘朝下
+- IK 可能**多解**：同一末端位姿对应多组关节角
 - IK 可能**无解**：目标太远或太近，物理上够不着
 - IK 可能**无穷多解**：Panda 有 7 个关节、末端只有 6 个自由度 → **冗余**
 
@@ -74,8 +74,8 @@
 
 - **只在小步时成立**（当前姿态下的线性近似）
 - **依赖当前姿态**：姿态变了 J 就变
-- 二连杆的 J 是 2×2；Panda 的是 **6×7**（末端 6 个自由度、7 个关节）
-- `det(J)=0`（或 σ_min = 0）就是奇异位姿：某个方向的瞬时运动能力**丧失**了
+- Panda 的 J 是 **6×7**（末端 6 个自由度、7 个关节）
+- `σ_min = 0`（或接近 0）就是奇异位姿：某个方向的瞬时运动能力**丧失**了
 
 ---
 
@@ -85,22 +85,23 @@
 cd robot_kinematics_app
 pip install -e .            # 会把运动学库一起装上
 
-make check                  # 环境自检
 make pick                   # 抓取流水线：一条命令跑完七道工序 + 出任务图
+# 或：PYTHONPATH=src python -m robotkinematics --observe 0.2 0 0 --plot
 ```
 
 `make pick` 会打印一份**任务结论**：结论（可执行 / 六类失败之一）、原因、
 七道工序各自的数字、关节解、候选解对比。图上四样东西：可达边界（采样估计）、
 机械臂姿态、末端路径、沿途的奇异点标记。
 
-**五条命令看完全貌**：
+**几条开关看完全貌**：
 
 ```bash
-rkin cam --case ppt_case     # ① 坐标变换链
-rkin fk  --q1 0 --q2 90      # ② 二连杆 FK（闭式解 + 与库对照）
-rkin ik  --target 1 1        # ③ 同一件事反过来：两组解，各自 FK 回验
-rkin jac --q1 0 --q2 90 --dx 0 0.1   # ④ 末端挪 0.1m，关节该转多少
-rkin panda-fk --case ppt_goal        # ⑤ 换成 7 自由度的真实机械臂
+rkin --observe 0.2 0 0 --plot
+rkin --observe 0.2 0 0 --format json
+rkin --observe 0.35 -0.05 0.15 --rpy 0 90 0
+rkin --observe 0.2 0 0 --mode base
+rkin --observe 0.2 0 0 --prefer-config 0 -0.3 0 -2.2 0 2.0 0.8
+rkin --observe 0.2 0 0 --seeds 32
 ```
 
 ---
@@ -109,25 +110,24 @@ rkin panda-fk --case ppt_goal        # ⑤ 换成 7 自由度的真实机械臂
 
 ```text
 robot_kinematics_app/
-├── configs/default.yaml      模型参数、相机外参、IK 参数、流水线阈值
-├── data/cases/*.csv          课件算例（原样保留，才能与课件输出逐条对照）
+├── configs/default.yaml      相机外参、IK 参数、流水线阈值
+├── data/cases/*.csv          课件算例（原样保留，供对照与扩展）
 ├── outputs/                  运行产物
 ├── docs/                     本文、KNOWLEDGE_MAP、NUMBERS、架构图
 ├── scripts/                  run_all.sh、架构图脚本
 ├── src/robotkinematics/
-│   ├── main.py               ★ 唯一入口 = 组合根：命令表 + 装配 + 异常出口
+│   ├── main.py               ★ 唯一入口 = 组合根：装配 + 扁平 CLI + 异常出口
 │   │                           读它一个文件就知道"这个程序用到哪些实现"
 │   ├── core/                 ★ 库覆盖不到的那部分
-│   │   ├── robots.py           从库建模型：末端帧、关节限位、link 位置
-│   │   ├── planar2r.py         二连杆解析 FK/IK（库给不出两组解）
+│   │   ├── robots.py           从库建 Panda：末端帧、关节限位、link 位置
 │   │   ├── workspace.py        可达性采样（库没有这个 API）
 │   │   ├── singularity.py      SVD 体检 + 库的 manipulability
 │   │   └── exceptions.py       领域异常
-│   ├── contracts.py          契约：Report / 报告块 + 4 个协议
-│   ├── usecases/             用例层（pick 是主线：pick + pick_types/steps/report）
-│   ├── adapters/             配置、算例、两种渲染、绘图
+│   ├── contracts.py          契约：Report / 报告块 + 协议
+│   ├── usecases/             用例层（只 pick*：pick + pick_types/steps/report）
+│   ├── adapters/             配置、两种渲染、绘图
 │   └── __main__.py           三行：`python -m robotkinematics` 的桥
-└── tests/                    170 条断言（含 test_architecture.py 的架构守卫）
+└── tests/                    架构守卫 + 流水线端到端断言
 ```
 
 **依赖方向**：`main.py → usecases → contracts / core`，`adapters` 实现 contracts 里的协议；
@@ -139,14 +139,14 @@ robot_kinematics_app/
 ## 第 4 章 · 一次抓取的一生
 
 ```bash
-rkin pick --observe 0.2 0 0 --plot
+rkin --observe 0.2 0 0 --plot
 ```
 
 | 工序 | 做什么 | 关键点 |
 |---|---|---|
-| ① 观测 → 本体位姿 | `SE3.Trans(camera) * SE3.Rz(yaw) * SE3(观测)` | 变换链顺序不能反 |
+| ① 观测 → 本体位姿 | `SE3.Trans(camera) * SE3.Rz(yaw) * SE3(观测)` | 变换链顺序不能反；`--mode base` 可跳过 |
 | ② 可达性预筛 | 采样几千个姿态，求沿目标方向的最大投影 | **工作空间不是球**：全方向最大 1.19m，但沿斜下方只有 1.09m |
-| ③ 多初值 IK | 对每个初值调 `ikine_LM` | Panda 24 个初值；二连杆直接给闭式解 |
+| ③ 多初值 IK | 对每个初值调 `ikine_LM` | 默认 24 个初值（可用 `--seeds` 覆盖） |
 | ④ 雅可比体检 | `robot.jacob0(q)` 做 SVD | σ_min 太小 → 这组解"不好动" |
 | ⑤ 限位校验 | `robot.qlim` | 越限位的解直接淘汰 |
 | ⑥ 解择优 | 评分：限位余量 0.5 + σ_min 0.3 + 就近 0.2 | 避免挑到"转两圈"的解 |
@@ -166,16 +166,16 @@ rkin pick --observe 0.2 0 0 --plot
 
 1. `core/robots.py` —— 看末端帧、限位、link 位置是怎么从库里取的
 2. `contracts.py` —— `Report` 与几种报告块；这是"用例产出什么"的定义
-3. `main.py` —— 命令表在文件开头、处理函数在末尾；看它怎么把模型和用例接起来
+3. `main.py` —— 装配、扁平参数、`run_pick`；看它怎么把模型和用例接起来
 
-**读完能回答**：`rkin pick` 到底用了库的哪几个 API？
+**读完能回答**：`rkin --observe …` 到底用了库的哪几个 API？
 
 ### 第 2 轮 · 五脏（约 60 分钟）
 
 4. `usecases/pick.py` —— 七道工序的主线，重点看每道工序**失败时怎么归类**
-5. `core/planar2r.py` —— 唯一保留的手推公式（闭式 IK 怎么给出两组解）
-6. `core/workspace.py` —— 可达性预筛：为什么库给不了、采样怎么做的
-7. `core/singularity.py` —— 体检报告的那几个数从哪来
+5. `core/workspace.py` —— 可达性预筛：为什么库给不了、采样怎么做的
+6. `core/singularity.py` —— 体检报告的那几个数从哪来
+7. `usecases/pick_steps.py` —— 每道工序的细节
 
 ### 第 3 轮 · 外围（约 45 分钟）
 
@@ -197,7 +197,7 @@ rkin pick --observe 0.2 0 0 --plot
 | 取 RPY | `T.rpy(order='zyx')` —— ⚠️ 必须带 order |
 | 取四元数 | `spatialmath.base.r2q(T.R)` —— ⚠️ 返回 **(w,x,y,z)** |
 | 取轴角 | `spatialmath.base.tr2angvec(R)` —— ⚠️ 返回 **(角度, 轴)** |
-| 建机器人 | `rtb.models.Panda()` / 自建 `DHRobot([RevoluteDH(a=…)])` |
+| 建机器人 | `rtb.models.Panda()` |
 | FK | `robot.fkine(q)`（批量：`robot.fkine(qs)`，qs 是 (N,n)） |
 | IK | `robot.ikine_LM(T, q0=…, tol=1e-9)` |
 | 雅可比 | `robot.jacob0(q)`（6×n） |
@@ -235,7 +235,7 @@ robot.fkine(q, end="panda_link8")   # 法兰           → 零位姿 [0.088, 0, 
 ```
 
 差 **103.4 mm**（法兰再往前 103.4mm、绕 z 转 45° 才是夹爪 TCP）。同一组关节角、两个都正确的数。
-课件的 `run_logs` 记的是默认末端（夹爪）；本项目报告默认给法兰、并**并排打印两个**。
+课件的 `run_logs` 记的是默认末端（夹爪）；本项目抓取流水线固定在夹爪帧。
 
 而且 `robot.ikine_LM` **只对模型默认末端求解**（传 `end=` 会报 `unexpected keyword argument`），
 所以抓取流水线固定在夹爪帧 —— 物理上抓东西的本来就是夹爪。
@@ -246,32 +246,17 @@ robot.fkine(q, end="panda_link8")   # 法兰           → 零位姿 [0.088, 0, 
 想要"位姿多准"，要么把 `tol` 调小、要么迭代完自己用 FK 回验再决定收不收
 （本项目两步都做了）。
 
-### 7.5 给平面机械臂传 `mask` 会崩
-
-想表达"只管位置、不管姿态"（`mask=[1,1,0,0,0,0]`）时，库内部用**未筛选**的权重矩阵
-乘上**已筛选**的误差向量，维数不匹配直接抛 `ValueError`。
-所以二连杆的候选解直接来自闭式解 —— 这也顺带解决了"库只给一组解"的问题。
-
-### 7.6 `robot.reach` 返回 0
+### 7.5 `robot.reach` 返回 0
 
 文档里它像"最大可达距离"，实测对本项目的模型返回 `0`（int）。
 想判"够不够得着"只能自己采样 —— 而采样恰好还更准（能给出**沿某方向**的边界，而不是一个球）。
 
-### 7.7 `Planar2` 的杆长是只读属性
-
-```python
-p2 = rtb.models.DH.Planar2()
-p2.a = [0.7, 1.3]   # AttributeError: property 'a' has no setter
-```
-
-要自定义杆长只能自建 `DHRobot([RevoluteDH(a=…), …])`。
-
-### 7.8 `manipulability(method='asada')` 可能返回 nan
+### 7.6 `manipulability(method='asada')` 可能返回 nan
 
 库给了 4 种可操作度定义，其中 `asada` 在某些位形下算出 nan。
 本项目用 `yoshikawa`，并拿自己算的（numpy SVD）与它对照 —— 两者逐位一致。
 
-### 7.9 `fkine` 批量返回值的类型会骗人
+### 7.7 `fkine` 批量返回值的类型会骗人
 
 ```python
 poses = robot.fkine(np.zeros((5, 7)))   # 批量
@@ -288,57 +273,42 @@ poses.t.shape                           # (5, 3) —— 这个才是真的
 
 ⚠️ 下面的结果全部是**实测值**，不是推测。
 
-### 实验 A · 看闭式解与库对齐
+### 实验 A · 位置可达 ≠ 位姿可达
 
 ```bash
-rkin fk --q1 0 --q2 90                # 末端 (1,1)，报告里会打印"与库 FK 的偏差"
-rkin jac --q1 0 --q2 90 --dx 0 0.1    # det(J)：闭式 1.000000 vs 库 1.000000
+rkin --observe 0.35 -0.05 0.15                # 姿态不可达（自上而下做不到）
+rkin --observe 0.35 -0.05 0.15 --rpy 0 90 0   # 换个姿态就通了
 ```
 
-### 实验 B · IK 多解（库给不出）
+### 实验 B · 工作空间不是球
 
 ```bash
-rkin ik --target 1 1       # 闭式解给两组：(0°,90°) 与 (90°,-90°)
+rkin --observe 2 2 2    # 不在工作空间：会告诉你沿该方向差多少米
 ```
 
-换成 `--target 2 0`（正外边界）会看到两组解**退化**成一组。
+### 实验 C · 库的 `tol` 怎么影响精度
 
-### 实验 C · 奇异点前关节速度的放大
+把 `configs/default.yaml` 的 `ik.tol` 从 `1e-9` 改成 `1e-3`，再跑
+`rkin --observe 0.2 0 0` —— 报告里的位置残差会明显变大。**这就是 7.4 那条坑**。
+
+### 实验 D · 偏好姿态与多初值
 
 ```bash
-rkin sing
+rkin --observe 0.2 0 0 --prefer-config 0 -0.3 0 -2.2 0 2.0 0.8
+rkin --observe 0.2 0 0 --seeds 32
 ```
 
-| q2 | 90° | 30° | 10° | 0° |
-|---|---|---|---|---|
-| cond(J) | 2.62 | 9.36 | 28.58 | inf |
-| 1/σ_min | 1.62 | 4.33 | 12.83 | inf |
-
-### 实验 D · 库的 `tol` 怎么影响精度
-
-把 `configs/default.yaml` 的 `ik.tol` 从 `1e-9` 改成 `1e-3`，再跑 `rkin panda-ik --case ppt_goal`
-—— 报告里的位置残差会明显变大。**这就是 7.4 那条坑**。
-
-### 实验 E · 位置可达 ≠ 位姿可达
+### 实验 E · 同一份结果出 JSON / 出图
 
 ```bash
-rkin pick --observe 0.35 -0.05 0.15                # 姿态不可达（自上而下做不到）
-rkin pick --observe 0.35 -0.05 0.15 --rpy 0 90 0   # 换个姿态就通了
+rkin --observe 0.2 0 0 --format json
+rkin --observe 0.2 0 0 --plot
 ```
 
-### 实验 F · 工作空间不是球
+### 实验 F · 观测已在本体坐标
 
 ```bash
-rkin pick --observe 2 2 2    # 不在工作空间：会告诉你沿该方向差 2.8 m
-```
-
-### 实验 G · 改配置 vs 改命令行
-
-编辑 `configs/default.yaml` 把 `planar.l1` 改成 0.5，然后：
-
-```bash
-rkin fk --q1 0 --q2 0                    # 用配置里的 0.5
-rkin fk --l1 1.0 --q1 0 --q2 0           # 命令行覆盖成 1.0（末端 2.0）
+rkin --observe 0.5 0 0.4 --mode base
 ```
 
 ---
@@ -356,9 +326,8 @@ rkin fk --l1 1.0 --q1 0 --q2 0           # 命令行覆盖成 1.0（末端 2.0�
 
 | 报错 | 原因 | 解决 |
 |---|---|---|
-| `ModuleNotFoundError: robotkinematics` | 没设 PYTHONPATH 也没安装 | `pip install -e .` 或 `PYTHONPATH=src python3 -m robotkinematics …` |
+| `ModuleNotFoundError: robotkinematics` | 没设 PYTHONPATH 也没安装 | `pip install -e .` 或 `PYTHONPATH=src python -m robotkinematics --observe …` |
 | `cannot import name 'plotvol3'` | 本机 matplotlib 3D 被老 `.pth` 劫持 | 见 README「已知环境问题」 |
-| `错误: 目标 (3.0, 0.0) 超出二连杆的工作空间` | 闭式解判定无解 | 换个可达目标，或加大 L1/L2 |
 | 结论是 `姿态不可达` | 位置够但方向做不到 | 换抓取姿态（`--rpy`） |
 | 结论是 `不在工作空间` | 物理上够不着 | 换观测点或挪机器人 |
 | 图里中文是方块 | 系统没装 CJK 字体 | `apt install fonts-noto-cjk` |
@@ -367,32 +336,27 @@ rkin fk --l1 1.0 --q1 0 --q2 0           # 命令行覆盖成 1.0（末端 2.0�
 
 ## 附录 · 一分钟速查
 
-**关键公式（现在只用来"对照库"）**
+**关键公式**
 
 ```
 R = Rz(yaw)·Ry(pitch)·Rx(roll)      ⇔  SE3.RPY(roll, pitch, yaw, order='zyx')
 ^A T_C = ^A T_B · ^B T_C            顺序不能反
-x = L1cos(q1) + L2cos(q1+q2)        二连杆 FK（闭式，用来对照库）
-cos(q2) = (x²+y²-L1²-L2²)/(2L1L2)   二连杆 IK（± → 肘上/肘下，库给不出）
-det(J) = L1·L2·sin(q2)              二连杆行列式（闭式，用来对照库）
 Δx ≈ J(q)·Δq                        雅可比：局部线性
 ```
 
 **关键数字**
 
-- 二连杆：`fk(0°,90°) = [1,1]`、`ik(1,1) = (0°,90°) / (90°,-90°)`；`det(J)` @ q2 = 90°/30°/10° → 1 / 0.866 / 0.173
-- 奇异点：`cond(J)` = 2.62 / 9.36 / 28.58 @ q2 = 90°/30°/10°；`1/σ_min` = 1.62 / 4.33 / 12.83
-- 坐标变换：`^base T_cup.t = [0.7830, 0.1634, 0.8]`
+- 坐标变换：`^base T_cup.t = [0.7830, 0.1634, 0.8]`（课件基准算例）
 - Panda：7 关节、雅可比 6×7；零位姿法兰 0.926 / 夹爪 TCP 0.8226（差 103.4 mm）
 - 抓取流水线评分权重：限位余量 0.5 + σ_min 0.3 + 就近 0.2
+- 可达边界（采样）：全方向最大约 1.19 m，沿斜下方约 1.09 m —— 工作空间不是球
 
 **关键命令**
 
 ```bash
-make check / test-fast / pick / run          # 自检 / 测试 / 抓取 / 全流程
-rkin cam | fk | ik | jac | sing              # 二连杆
-rkin panda-fk | panda-ik | panda-jac | panda-sing
-rkin pick --observe X Y Z [--arm planar]     # 抓取流水线
+make test-fast / pick / run          # 测试 / 抓取 / 全流程演示
+rkin --observe X Y Z [--plot] [--format json] [--mode …] [--rpy …] [--prefer-config …] [--seeds …]
+PYTHONPATH=src python -m robotkinematics --observe 0.2 0 0
 ```
 
 **分层依赖**：`main.py → usecases → contracts/core`；**用例不许直接依赖 adapters** —— 这三条由 `tests/test_architecture.py` 守着。

@@ -15,7 +15,6 @@ import numpy as np
 from spatialmath import SE3
 
 from ..core import robots, workspace
-from ..core.planar2r import Planar2R
 
 # ── 七类结论（一类成功 + 六类失败）─────────────────────────────────────────
 OUTCOME_REACHABLE = "可执行"
@@ -55,20 +54,19 @@ class PickParams:
     workspace_seed: int = 0
     limit_margin_deg: float = 0.0
     max_iter: int = 200  # 单次 ikine_LM 的迭代上限
-    ik_tol: float = 1e-9  # 传给库的关节步长容差（不是位姿残差！见下方 ⚠️）
+    ik_tol: float = 1e-9  # 传给库的关节步长容差（不是位姿残差！）
     micro_step_m: float = 0.001  # 微动校验的末端步长（默认 1mm）
     max_joint_step_deg: float = 5.0  # 微动对应的关节角上限
 
 
 @dataclass(frozen=True)
 class PickTask:
-    """一次抓取任务：抓哪里、用什么姿态、用哪台机器人。"""
+    """一次抓取任务：抓哪里、什么姿态（机器人固定为 Panda）。"""
 
     observation: np.ndarray  # 观测点（默认在相机坐标系下，见 mode）
     camera_xyz: tuple[float, float, float] = (0.30, 0.00, 0.60)
     camera_yaw_deg: float = 30.0
     orientation_rpy_deg: tuple[float, float, float] = (180.0, 0.0, 0.0)
-    arm: str = "panda"  # "panda" | "planar"
     # 抓取用的末端帧：固定为**夹爪 TCP**（= 库的默认末端）。
     # ⚠️ 不能改成法兰：库的 `ikine_LM` 只对模型的默认末端求解，不接受 end 参数；
     #    而且物理上抓东西的本来就是夹爪，不是法兰。
@@ -76,12 +74,6 @@ class PickTask:
     mode: str = "camera"  # "camera"=观测在相机系；"base"=已在本体系
     prefer_config: np.ndarray | None = None  # 显式偏好；为空时用 q_home 兜底
     q_home: np.ndarray | None = None  # 初始位形；同时作为"就近择优"的默认偏好
-    planar: Planar2R | None = None  # 二连杆的闭式解（arm="planar" 时必填）
-
-    @property
-    def is_planar(self) -> bool:
-        """这条路走闭式解（二连杆）还是数值解（Panda）。"""
-        return self.arm == "planar"
 
     def home(self, n_joints: int) -> np.ndarray:
         """初始位形：没给就是零位形。"""
@@ -106,7 +98,7 @@ class PickCandidate:
 
     q: np.ndarray
     seed_index: int
-    residual: float  # 任务残差（只算参与求解的那几维）
+    residual: float  # 任务残差（位置 + 姿态）
     position_error: float
     orientation_error: float
     sigma_min: float
@@ -151,13 +143,7 @@ class PickResult:
 
 @dataclass
 class PipelineState:
-    """工序之间传递的状态 —— 每道工序只读写自己关心的字段。
-
-    为什么是一个可变对象而不是层层返回值：七道工序的产出形状各不相同
-    （位姿 / 可达估计 / 候选列表 / 最优解），硬凑一个统一的返回值只会让每道工序
-    都去拆一个它不关心的元组。这里用"共享状态 + 显式字段"，反而每道工序的
-    输入输出一眼可见（看它读写了哪些字段）。
-    """
+    """工序之间传递的状态 —— 每道工序只读写自己关心的字段。"""
 
     target: SE3 | None = None
     reach: workspace.ReachEstimate | None = None
@@ -169,10 +155,7 @@ class PipelineState:
 
 @dataclass(frozen=True)
 class Failure:
-    """一道工序给出的**短路信号**：整条流水线停在这里，带着有名字的结论。
-
-    短路策略因此只有一处（`pick.py` 的执行器），而不是散在七道工序里各自 `return`。
-    """
+    """一道工序给出的**短路信号**：整条流水线停在这里，带着有名字的结论。"""
 
     outcome: str
     reason: str

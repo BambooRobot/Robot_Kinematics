@@ -7,14 +7,11 @@ PYTHON ?= python3
 export PYTHONPATH := src
 
 .DEFAULT_GOAL := help
-.PHONY: help check test test-fast lint fmt type check-all run pick pick-fail arch clean
+.PHONY: help test test-fast lint fmt type check-all run pick pick-fail arch clean
 
 help:  ## 列出所有可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
-
-check:  ## 环境自检
-	$(PYTHON) -m robotkinematics check
 
 test:  ## 跑全部测试（含覆盖率）
 	$(PYTHON) -m pytest
@@ -37,14 +34,14 @@ type:  ## 类型检查（mypy）
 
 check-all: lint type test  ## 提交前跑这一条：静态检查 + 类型 + 测试
 
-run:  ## 跑完整演示流程，产物落到 outputs/
+run:  ## 跑演示流程，产物落到 outputs/
 	bash scripts/run_all.sh
 
 pick:  ## 抓取流水线：相机观测 → 关节解（默认带一张任务图）
-	$(PYTHON) -m robotkinematics pick --observe 0.2 0 0 --plot
+	$(PYTHON) -m robotkinematics --observe 0.2 0 0 --plot
 
-pick-fail:  ## 抓取流水线：一个够不着的例子（看失败结论怎么给）
-	$(PYTHON) -m robotkinematics pick --observe 0.35 -0.05 0.15
+pick-fail:  ## 抓取流水线：一个够不着 / 姿态不可达的例子（看失败结论怎么给）
+	$(PYTHON) -m robotkinematics --observe 0.35 -0.05 0.15
 
 arch:  ## 重新生成架构图（SVG + PNG）
 	$(PYTHON) scripts/render_architecture.py
