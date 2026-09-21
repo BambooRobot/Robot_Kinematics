@@ -103,10 +103,16 @@ class CsvCaseSource:
     """实现 contracts.CaseSource 协议：从 data/cases/*.csv 读算例。"""
 
     def __init__(self, directory: str | Path) -> None:
+        """@brief 指定算例目录。
+
+        @param directory 存放 CSV 的目录（通常是 configs 里的 paths.cases_dir）
+        """
         self.directory = Path(directory)
 
     def coordinate_cases(self) -> list[CoordinateCase]:
+        """@brief 见 load_coordinate_cases。"""
         return load_coordinate_cases(self.directory)
 
     def panda_cases(self) -> list[PandaCase]:
+        """@brief 见 load_panda_cases。"""
         return load_panda_cases(self.directory)

@@ -184,12 +184,18 @@ class MatplotlibPlotter:
     """实现 contracts.Plotter 协议：把图存到构造时给定的目录。"""
 
     def __init__(self, outputs_dir: str | Path = "outputs") -> None:
+        """@brief 指定图片存放目录。
+
+        @param outputs_dir 目录不存在时会自动创建
+        """
         self.outputs_dir = outputs_dir
 
     def plot_panda_skeleton(self, robot, q) -> Path:
+        """@brief 见模块级 plot_panda_skeleton。"""
         return plot_panda_skeleton(robot, q, self.outputs_dir)
 
     def plot_pick_result(self, task, result, robot) -> Path:
+        """@brief 见模块级 plot_pick_result。"""
         return plot_pick_result(task, result, robot, self.outputs_dir)
 
 

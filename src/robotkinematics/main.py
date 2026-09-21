@@ -88,9 +88,7 @@ def build_context(args: argparse.Namespace) -> Context:
 
 def run_pick(args: argparse.Namespace, ctx: Context) -> CommandOutput:
     """抓取流水线（七道工序 + 失败分类）→ `usecases.pick.pick / to_report`。"""
-    prefer = (
-        np.asarray(args.prefer_config, dtype=float) if args.prefer_config is not None else None
-    )
+    prefer = np.asarray(args.prefer_config, dtype=float) if args.prefer_config is not None else None
     robot = ctx.make_panda(robots.TCP)
     task = pick_uc.PickTask(
         observation=np.asarray(args.observe, dtype=float),

@@ -160,4 +160,3 @@ def out_of_limits(q: np.ndarray, limits: np.ndarray | None, tol: float = 1e-9) -
         for i, (qi, (lo, hi)) in enumerate(zip(q, limits, strict=True))
         if qi < lo - tol or qi > hi + tol
     ]
-

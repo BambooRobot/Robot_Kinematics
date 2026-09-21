@@ -63,6 +63,47 @@ def _called_names(path: Path) -> set[str]:
 
 ASSEMBLY_CALLS = {"CsvCaseSource", "MatplotlibPlotter", "TextRenderer", "JsonRenderer", "from_yaml"}
 
+#: 造机器人的工厂（core.robots 里的函数名）
+ROBOT_FACTORIES = {"panda", "planar"}
+
+
+def _parser_actions() -> list[argparse.Action]:
+    """解析器的参数表。
+
+    argparse 没有公开 API 能枚举参数，只能读 `_actions` —— 所以这个"越界访问"收在这一个
+    函数里、只解释一次，而不是在三处测试里各写一遍（读不到就直接炸，不会静默通过）。
+    """
+    return list(build_parser()._actions)
+
+
+def _robot_factory_scopes(path: Path) -> dict[str, set[str]]:
+    """返回 {函数/方法的限定名: 它**直接**调用的机器人工厂名}。
+
+    ⚠️ 这里不能用 `ast.walk`：要回答的是"这个调用属于哪个函数"，
+      而 walk 丢掉了父链 —— 于是 `Context.make_panda` 里的调用会被算到模块头上，
+       分不清是"工厂方法造的"还是"随手造的"。所以自己递归、自己带作用域名。
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: dict[str, set[str]] = {}
+
+    def visit(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{scope}.{child.name}" if scope else child.name
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and isinstance(child.func.value, ast.Name)
+                and child.func.value.id == "robots"
+                and child.func.attr in ROBOT_FACTORIES
+            ):
+                found.setdefault(scope, set()).add(child.func.attr)
+            visit(child, name)
+
+    visit(tree, "")
+    return found
+
 
 def test_only_the_entry_constructs_concrete_adapters():
     """除入口外，谁都不许造具体适配器 —— 想换实现只该改 `main.build_context` 一处。"""
@@ -76,49 +117,32 @@ def test_only_the_entry_constructs_concrete_adapters():
 
 def test_config_overrides_keys_are_real_cli_flags():
     """`CONFIG_OVERRIDES` 的每个键必须是解析器真实存在的参数 —— 防"死映射"。"""
-    dests = {action.dest for action in build_parser()._actions}  # noqa: SLF001
+    dests = {action.dest for action in _parser_actions()}
     dead = {flag for flag in CONFIG_OVERRIDES if flag not in dests}
     assert not dead, f"CONFIG_OVERRIDES 死键（解析器里没有这个开关）：{sorted(dead)}"
 
 
 def test_only_the_context_builds_robots():
-    """机器人构造只出现在 `Context` 的工厂里 —— 处理函数一律走 `ctx.make_*`。"""
-    tree = ast.parse(ENTRY.read_text(encoding="utf-8"))
-    factory_calls = {"panda"}
+    """机器人只在 `Context.make_panda` 里被构造 —— 别处一律走 `ctx.make_panda(...)`。
 
-    def robot_calls(node: ast.AST) -> set[str]:
-        found: set[str] = set()
-        for call in ast.walk(node):
-            if (
-                isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "robots"
-                and call.func.attr in factory_calls
-            ):
-                found.add(call.func.attr)
-        return found
+    这是"装配只在入口"的下半句：入口允许装配，但**装配点也只有一个**。
+    守它的收益很具体：要换末端帧、换机型（Panda 之外），只改工厂那一处，
+    不会漏掉某个角落里偷偷 new 出来的第二台机器人。
 
-    offenders: dict[str, set[str]] = {}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("make_"):
-                continue  # Context 工厂方法允许
-            if bad := robot_calls(node):
-                # run_pick / build_context 也不该直接造；但 make_panda 是方法
-                offenders[node.name] = bad
-    # Context 的方法在 ClassDef 内，上面只扫模块级函数 —— 再扫一遍类内方法名
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "Context":
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    # 工厂内调用 robots.panda 是允许的
-                    pass
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name in {"run_pick", "build_context", "main", "build_parser"}:
-                if bad := robot_calls(node):
-                    offenders[node.name] = bad
-    assert not offenders, f"绕过 Context 工厂直接造机器人的函数：{offenders}"
+    全 src 扫描（不只是入口文件）：`robots.panda(...)` 这种调用出现的位置，
+    有且只有 `main.py::Context.make_panda`。
+    """
+    scopes: dict[str, set[str]] = {}
+    for path in _source_files(SRC):
+        for scope, names in _robot_factory_scopes(path).items():
+            scopes[f"{path.relative_to(SRC).as_posix()}::{scope or '<模块级>'}"] = names
+
+    # 反向守卫：工厂必须真的存在且在造机器人 —— 否则这条测试会"空转也全绿"
+    factory = "main.py::Context.make_panda"
+    assert factory in scopes, f"没找到唯一的机器人装配点 {factory}；实际调用点：{scopes}"
+
+    offenders = {scope: sorted(names) for scope, names in scopes.items() if scope != factory}
+    assert not offenders, f"绕过 Context 工厂直接造机器人的位置：{offenders}"
 
 
 @pytest.mark.parametrize(
@@ -146,10 +170,10 @@ def test_contracts_depends_on_no_layer():
 
 def test_cli_has_no_subcommands():
     """入口是扁平 CLI：解析器里不得再有子命令表。"""
-    for action in build_parser()._actions:
+    actions = _parser_actions()
+    for action in actions:
         assert not isinstance(action, argparse._SubParsersAction), "不应再有子命令"
-    dests = {action.dest for action in build_parser()._actions}
-    assert "observe" in dests
+    assert "observe" in {action.dest for action in actions}
 
 
 def test_pipeline_is_the_single_source_of_truth_for_the_steps():
